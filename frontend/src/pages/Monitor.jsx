@@ -1,9 +1,17 @@
 import { useWebSocket } from '../hooks/useWebSocket'
-import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from 'recharts'
+import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, BarChart, Bar, Legend } from 'recharts'
 import { useState, useEffect } from 'react'
 import { useI18n } from '../i18n/I18nContext'
 
 const MAX_POINTS = 60
+
+// 递进式单位：1.8M / 208K / 950，方便阅读大数字
+function fmtTokens(n) {
+  if (n == null) return null
+  if (n >= 1e6) return `${(n / 1e6).toFixed(n % 1e6 ? 1 : 0)}M`
+  if (n >= 1e3) return `${(n / 1e3).toFixed(n % 1e3 ? 1 : 0)}K`
+  return String(n)
+}
 
 function MetricCard({ label, value, unit, color }) {
   return (
@@ -50,6 +58,20 @@ export default function Monitor({ targetId }) {
   )
   const { t } = useI18n()
   const [history, setHistory] = useState({ speed: [], cache: [], spec: [] })
+  const [tokenStats, setTokenStats] = useState([])
+
+  // Token 用量统计（按天，后端持久化）：进入时拉取，每 60s 刷新
+  useEffect(() => {
+    if (!targetId) return
+    const load = () =>
+      fetch(`/api/monitor/token-stats?target_id=${targetId}&days=14`)
+        .then((r) => r.json())
+        .then(setTokenStats)
+        .catch(() => {})
+    load()
+    const timer = setInterval(load, 60000)
+    return () => clearInterval(timer)
+  }, [targetId])
 
   // 切换目标机器时清空历史
   useEffect(() => {
@@ -133,8 +155,8 @@ export default function Monitor({ targetId }) {
 
       {/* 推理指标数值 */}
       <div className="grid grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
-        <MetricCard label="Prompt Tokens" value={metrics.prompt_tokens} color="text-blue" />
-        <MetricCard label={t('monitor.completionTokens')} value={metrics.completion_tokens} color="text-green" />
+        <MetricCard label="Prompt Tokens" value={fmtTokens(metrics.prompt_tokens)} color="text-blue" />
+        <MetricCard label={t('monitor.completionTokens')} value={fmtTokens(metrics.completion_tokens)} color="text-green" />
         <MetricCard label={t('monitor.genSpeed')} value={metrics.completion_speed} unit="t/s" color="text-green" />
         <MetricCard label={t('monitor.promptSpeed')} value={metrics.prompt_speed} unit="t/s" color="text-blue" />
         <MetricCard label={t('monitor.cacheHit')} value={metrics.cache_hit_rate} unit="%" color="text-purple" />
@@ -146,6 +168,25 @@ export default function Monitor({ targetId }) {
         <ChartPanel title={t('monitor.chartSpeed')} data={h.speed} dataKey="value" color="#a6e3a1" unit=" t/s" />
         <ChartPanel title={t('monitor.chartCache')} data={h.cache} dataKey="value" color="#cba6f7" unit="%" />
         <ChartPanel title={t('monitor.chartSpec')} data={h.spec} dataKey="value" color="#94e2d5" unit="%" />
+      </div>
+
+      {/* Token 用量统计（按天，输入/输出） */}
+      <div className="bg-card rounded-lg p-4 border border-gray/30 mt-4">
+        <div className="text-sm font-semibold mb-2">{t('monitor.tokenUsage')}</div>
+        <ResponsiveContainer width="100%" height={200}>
+          <BarChart data={tokenStats} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#3a3a4c" />
+            <XAxis dataKey="date" stroke="#6c7086" fontSize={10} tickLine={false} tickFormatter={(d) => d.slice(5)} />
+            <YAxis stroke="#6c7086" fontSize={10} tickLine={false} width={45} tickFormatter={(v) => fmtTokens(v)} />
+            <Tooltip
+              contentStyle={{ background: '#181825', border: '1px solid #45475a', borderRadius: 8, fontSize: 12 }}
+              formatter={(val, name) => [fmtTokens(val), name === 'prompt' ? t('monitor.promptTokens') : t('monitor.outputTokens')]}
+            />
+            <Legend formatter={(v) => (v === 'prompt' ? t('monitor.promptTokens') : t('monitor.outputTokens'))} />
+            <Bar dataKey="prompt" fill="#89b4fa" radius={[3, 3, 0, 0]} />
+            <Bar dataKey="completion" fill="#a6e3a1" radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
       </div>
     </div>
   )

@@ -39,6 +39,9 @@ export const translations = {
     'monitor.chartSpeed': 'Token Generation Speed (t/s)',
     'monitor.chartCache': 'Cache Hit Rate (%)',
     'monitor.chartSpec': 'Speculative Accept Rate (%)',
+    'monitor.tokenUsage': 'Token Usage (by Day)',
+    'monitor.promptTokens': 'Prompt (Input)',
+    'monitor.outputTokens': 'Completion (Output)',
 
     // ===== Store =====
     'store.title': 'Model Store',
@@ -339,6 +342,9 @@ export const translations = {
     'monitor.chartSpeed': 'Token 生成速度 (t/s)',
     'monitor.chartCache': '缓存命中率 (%)',
     'monitor.chartSpec': '投机采样接受率 (%)',
+    'monitor.tokenUsage': 'Token 用量（按天）',
+    'monitor.promptTokens': '输入 (Prompt)',
+    'monitor.outputTokens': '输出 (Completion)',
 
     // ===== Store =====
     'store.title': '模型商店',
