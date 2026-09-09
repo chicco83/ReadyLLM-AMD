@@ -80,19 +80,38 @@ def record_tokens(target_id: str, metrics: dict) -> None:
         _save(data)
 
 
-def get_daily_stats(target_id: str, days: int = 14) -> list:
-    """返回最近 days 天（含今天）的 [{date, prompt, completion}]，缺失天补 0。"""
+def get_total_stats(target_id: str) -> dict:
+    """累计消耗：所有已记录天的 prompt/completion 求和（不受查询窗口限制）。"""
     with _lock:
         data = _load()
     day_map = data.get(target_id, {}).get("days", {})
-    result = []
+    total_p = sum(v.get("prompt", 0) for v in day_map.values())
+    total_c = sum(v.get("completion", 0) for v in day_map.values())
+    return {"prompt": total_p, "completion": total_c, "total": total_p + total_c}
+
+
+def get_daily_stats(target_id: str, days: int = 14) -> list:
+    """返回 [{date, prompt, completion}]，缺失天补 0。
+
+    窗口起点：最早有数据的那天（含今天）；尚无任何数据时回退最近 days 天。
+    """
+    with _lock:
+        data = _load()
+    day_map = data.get(target_id, {}).get("days", {})
     today = date.today()
-    for i in range(days - 1, -1, -1):
-        d = (today - timedelta(days=i)).isoformat()
+    if day_map:
+        start = min(date.fromisoformat(d) for d in day_map)
+    else:
+        start = today - timedelta(days=days - 1)
+    result = []
+    cur = start
+    while cur <= today:
+        d = cur.isoformat()
         v = day_map.get(d, {"prompt": 0, "completion": 0})
         result.append({
             "date": d,
             "prompt": v.get("prompt", 0),
             "completion": v.get("completion", 0),
         })
+        cur += timedelta(days=1)
     return result

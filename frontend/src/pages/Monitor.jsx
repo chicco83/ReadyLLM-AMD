@@ -59,15 +59,21 @@ export default function Monitor({ targetId }) {
   const { t } = useI18n()
   const [history, setHistory] = useState({ speed: [], cache: [], spec: [] })
   const [tokenStats, setTokenStats] = useState([])
+  const [tokenTotal, setTokenTotal] = useState({ prompt: 0, completion: 0, total: 0 })
 
-  // Token 用量统计（按天，后端持久化）：进入时拉取，每 60s 刷新
+  // Token 用量统计（按天 + 累计，后端持久化）：进入时拉取，每 60s 刷新
   useEffect(() => {
     if (!targetId) return
-    const load = () =>
+    const load = () => {
       fetch(`/api/monitor/token-stats?target_id=${targetId}&days=14`)
         .then((r) => r.json())
         .then(setTokenStats)
         .catch(() => {})
+      fetch(`/api/monitor/token-total?target_id=${targetId}`)
+        .then((r) => r.json())
+        .then(setTokenTotal)
+        .catch(() => {})
+    }
     load()
     const timer = setInterval(load, 60000)
     return () => clearInterval(timer)
@@ -172,7 +178,18 @@ export default function Monitor({ targetId }) {
 
       {/* Token 用量统计（按天，输入/输出） */}
       <div className="bg-card rounded-lg p-4 border border-gray/30 mt-4">
-        <div className="text-sm font-semibold mb-2">{t('monitor.tokenUsage')}</div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-sm font-semibold">{t('monitor.tokenUsage')}</div>
+          <div className="text-xs text-gray">
+            {t('monitor.tokenTotal')}{' '}
+            <span className="text-fg font-semibold text-sm">{fmtTokens(tokenTotal.total)}</span>
+            <span className="ml-2">
+              <span className="text-blue">{t('monitor.promptTokens')} {fmtTokens(tokenTotal.prompt)}</span>
+              <span className="mx-1">·</span>
+              <span className="text-green">{t('monitor.outputTokens')} {fmtTokens(tokenTotal.completion)}</span>
+            </span>
+          </div>
+        </div>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={tokenStats} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#3a3a4c" />

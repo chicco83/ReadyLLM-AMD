@@ -40,6 +40,7 @@ export const translations = {
     'monitor.chartCache': 'Cache Hit Rate (%)',
     'monitor.chartSpec': 'Speculative Accept Rate (%)',
     'monitor.tokenUsage': 'Token Usage (by Day)',
+    'monitor.tokenTotal': 'Total consumed:',
     'monitor.promptTokens': 'Prompt (Input)',
     'monitor.outputTokens': 'Completion (Output)',
 
@@ -343,6 +344,7 @@ export const translations = {
     'monitor.chartCache': '缓存命中率 (%)',
     'monitor.chartSpec': '投机采样接受率 (%)',
     'monitor.tokenUsage': 'Token 用量（按天）',
+    'monitor.tokenTotal': '累计消耗：',
     'monitor.promptTokens': '输入 (Prompt)',
     'monitor.outputTokens': '输出 (Completion)',
 

@@ -123,7 +123,10 @@ function AppInner() {
             </select>
           </div>
         )}
-        <LangSwitch />
+        {/* 目标机器选择器隐藏时（设置页 / 无目标），语言按钮需自己吸底 */}
+        <div className={page === 'settings' || !hasTarget ? 'mt-auto pt-4' : 'mt-3'}>
+          <LangSwitch />
+        </div>
       </nav>
 
       {/* 主内容 */}

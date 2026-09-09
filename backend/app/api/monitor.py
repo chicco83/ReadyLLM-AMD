@@ -9,7 +9,7 @@ from ..config import REFRESH_INTERVAL
 from ..models.target import get_target
 from ..services.executor import make_executor
 from ..services.collectors import collect_all
-from ..services.token_stats import record_tokens, get_daily_stats
+from ..services.token_stats import record_tokens, get_daily_stats, get_total_stats
 
 router = APIRouter()
 
@@ -33,6 +33,12 @@ def get_snapshot(target_id: str):
 def get_token_stats(target_id: str, days: int = 14):
     """按天的 token 用量统计（输入/输出），持久化，重启不丢失"""
     return get_daily_stats(target_id, days)
+
+
+@router.get("/token-total")
+def get_token_total(target_id: str):
+    """累计消耗 token（所有已记录天求和）"""
+    return get_total_stats(target_id)
 
 
 @router.websocket("/ws")
