@@ -3,13 +3,15 @@
 统一本机执行与远程 SSH 执行接口，所有功能基于用户配置的 Target 运行，
 不依赖任何硬编码环境。
 
-除命令行执行 run() 外，另提供 write_file()：通过 SFTP（远程）或本地文件
+除命令行执行 run() 外，另提供 write_file()：通过 scp（远程）或本地文件
 写入大体积内容，绕开 Windows cmd.exe 命令行 8191 字符上限——长 prompt 测速
 必须走此通道，否则 base64 内嵌的命令会被截断。
 """
 
 import os
+import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from typing import Optional
 
@@ -108,111 +110,123 @@ class LocalExecutor(Executor):
 
 
 class SSHExecutor(Executor):
-    """远程 SSH 执行器（paramiko）"""
+    """远程 SSH 执行器（复用系统 OpenSSH 客户端 ssh / scp）
+
+    不使用 paramiko：系统 ssh/scp 能正确读取 ~/.ssh/config、使用默认密钥
+    （id_ed25519 等标准名）、与 Windows OpenSSH 完成算法协商，兼容性更好，
+    也避免 paramiko 在某些环境下连接握手卡住的问题。
+    """
 
     def __init__(self, target: Target):
         self.target = target
-        self._client = None
 
-    def _get_client(self):
-        import paramiko
+    def _dest(self) -> str:
+        return f"{self.target.user}@{self.target.host}"
 
-        if self._client is not None:
-            return self._client
+    def _common_opts(self) -> list:
+        # BatchMode=yes：需要交互（密码/确认）时立即失败而非永久挂起，
+        # 对后台服务至关重要。
+        return [
+            "-o", "BatchMode=yes",
+            "-o", "ConnectTimeout=10",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "UserKnownHostsFile=/dev/null",
+        ]
 
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    def _identity(self) -> list:
+        # 指定了私钥则用之；否则交给系统 ssh 使用默认密钥（~/.ssh/id_ed25519 等）
+        if self.target.key_path:
+            return ["-i", os.path.expanduser(self.target.key_path)]
+        return []
 
+    def _wrap_pw(self, base: list) -> list:
+        """密码认证且装有 sshpass 时前置 sshpass；否则原样返回。
+        未装 sshpass 时 BatchMode 会让密码认证快速失败而非挂起。"""
         t = self.target
-        connect_kwargs = {
-            "hostname": t.host,
-            "port": t.port,
-            "username": t.user,
-            "timeout": 10,
-        }
-
-        if t.auth_type == "password" and t.password:
-            connect_kwargs["password"] = t.password
-        else:
-            # 密钥认证，默认 ~/.ssh/id_rsa
-            key = t.key_path or os.path.expanduser("~/.ssh/id_rsa")
-            if os.path.exists(key):
-                connect_kwargs["key_filename"] = key
-
-        client.connect(**connect_kwargs)
-        self._client = client
-        return client
+        if t.auth_type == "password" and t.password and shutil.which("sshpass"):
+            return ["sshpass", "-p", t.password] + base
+        return base
 
     def run(self, cmd: str, timeout: int = 15) -> ExecResult:
+        argv = self._wrap_pw(
+            ["ssh"] + self._common_opts() + self._identity()
+            + ["-p", str(self.target.port), self._dest(), cmd]
+        )
         try:
-            client = self._get_client()
-            stdin, stdout, stderr = client.exec_command(cmd, timeout=timeout)
-            out = _decode(stdout.read()).strip()
-            err = _decode(stderr.read()).strip()
-            rc = stdout.channel.recv_exit_status()
-            return ExecResult(stdout=out, stderr=err, returncode=rc)
+            result = subprocess.run(argv, capture_output=True, timeout=timeout)
+            return ExecResult(
+                stdout=_decode(result.stdout).strip(),
+                stderr=_decode(result.stderr).strip(),
+                returncode=result.returncode,
+            )
+        except subprocess.TimeoutExpired:
+            return ExecResult(stdout="", stderr="SSH 命令执行超时", returncode=-1)
         except Exception as e:
-            # 连接异常时重置客户端，下次重连
-            self._client = None
             return ExecResult(stdout="", stderr=str(e), returncode=-1)
 
+    def _scp_argv(self, src: str, dst: str) -> list:
+        # scp 用 -P 指定端口（与 ssh 的 -p 不同）
+        base = (["scp"] + self._common_opts() + self._identity()
+                + ["-P", str(self.target.port), src, dst])
+        return self._wrap_pw(base)
+
     def write_file(self, content: str, path: str) -> bool:
-        """通过 SFTP 写文件，绕开命令行长度限制。
-
-        Windows OpenSSH 的 SFTP 接受正斜杠路径（如 C:/temp/bench.json），
-        目录需调用方先行创建（SFTP 跨平台逐级建目录不可靠）。
-        """
-        try:
-            client = self._get_client()
-            sftp = client.open_sftp()
-            try:
-                with sftp.file(path, "wb") as f:
-                    f.write(content.encode("utf-8"))
-            finally:
-                sftp.close()
-            return True
-        except Exception:
-            self._client = None
-            return False
-
-    def read_file_bytes(self, path: str) -> Optional[bytes]:
-        """通过 SFTP 读取目标机文件的二进制内容（如把成片 mp4 拉回控制端）。
-        Windows OpenSSH 的 SFTP 接受正斜杠路径，调用方需先把反斜杠转过来。"""
-        try:
-            client = self._get_client()
-            sftp = client.open_sftp()
-            try:
-                with sftp.open(path.replace("\\", "/"), "rb") as f:
-                    return f.read()
-            finally:
-                sftp.close()
-        except Exception:
-            self._client = None
-            return None
+        return self.write_file_bytes(content.encode("utf-8"), path)
 
     def write_file_bytes(self, data: bytes, path: str) -> bool:
-        """通过 SFTP 上传二进制文件到目标机（如把首帧图推到 ComfyUI/input）。
-        Windows OpenSSH 的 SFTP 接受正斜杠路径，调用方需先把反斜杠转过来。"""
+        """通过 scp 上传，绕开命令行长度限制。
+
+        Windows OpenSSH 的 scp 接受正斜杠路径（如 C:/temp/bench.json），
+        目录需调用方先行创建。"""
+        remote = path.replace("\\", "/")
+        tmp = None
         try:
-            client = self._get_client()
-            sftp = client.open_sftp()
-            try:
-                with sftp.open(path.replace("\\", "/"), "wb") as f:
-                    f.write(data)
-            finally:
-                sftp.close()
-            return True
+            fd, tmp = tempfile.mkstemp()
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            result = subprocess.run(
+                self._scp_argv(tmp, f"{self._dest()}:{remote}"),
+                capture_output=True, timeout=60,
+            )
+            return result.returncode == 0
         except Exception:
-            self._client = None
             return False
+        finally:
+            if tmp and os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+
+    def read_file_bytes(self, path: str) -> Optional[bytes]:
+        """通过 scp 下载目标机文件（如把成片 mp4 拉回控制端）。
+
+        Windows OpenSSH 的 scp 接受正斜杠路径，调用方需先把反斜杠转过来。"""
+        remote = path.replace("\\", "/")
+        tmp = None
+        try:
+            fd, tmp = tempfile.mkstemp()
+            os.close(fd)
+            result = subprocess.run(
+                self._scp_argv(f"{self._dest()}:{remote}", tmp),
+                capture_output=True, timeout=120,
+            )
+            if result.returncode != 0 or not os.path.exists(tmp):
+                return None
+            with open(tmp, "rb") as f:
+                return f.read()
+        except Exception:
+            return None
+        finally:
+            if tmp and os.path.exists(tmp):
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
 
     def close(self):
-        if self._client:
-            try:
-                self._client.close()
-            except Exception:
-                pass
-            self._client = None
+        # 系统 ssh/scp 每次调用都是独立连接，无需维护长连接
+        pass
 
 
 def make_executor(target: Target) -> Executor:

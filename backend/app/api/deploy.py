@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel
 from typing import Optional
 
-from ..models.target import get_target
+from ..models.target import get_target, upsert_target
 from ..services.executor import make_executor
 from ..services.engine_adapter import StartParams
 from ..services.engine_registry import get_adapter
@@ -219,11 +219,23 @@ def start_model(req: DeployRequest):
             extra.append("--metrics")
         if "--host" not in joined:
             extra += ["--host", "0.0.0.0"]
+        # 用户在参数里改了端口时，回写机器配置并持久化，使监控/状态/生成自动跟随。
+        # （--port 已在 extra 中，llama_cpp 检测到就不会再补默认，启动端口与之一致）
+        for i, tok in enumerate(extra):
+            if tok == "--port" and i + 1 < len(extra):
+                try:
+                    pv = int(extra[i + 1])
+                    if pv and pv != target.service_port:
+                        target.service_port = pv
+                        upsert_target(target)
+                except ValueError:
+                    pass
+                break
         params = StartParams(model_path=model_path, extra_args=extra)
         success, msg = engine.start(params)
         if success:
             _record_running(req.target_id, req.model)
-        return {"success": success, "message": msg, "args": extra}
+        return {"success": success, "message": msg, "args": extra, "port": target.service_port}
     finally:
         executor.close()
 
@@ -450,6 +462,18 @@ def _params_to_args_str(params: dict) -> str:
     return " ".join(parts)
 
 
+def _ensure_port(args_str: str, port: int) -> str:
+    """确保参数串含 --port {port}：已有则原样（尊重用户编辑），无则追加。
+    让部署页参数框展示端口，用户可直接改端口固定服务监听。"""
+    try:
+        toks = args_str.split()
+    except AttributeError:
+        toks = []
+    if "--port" in toks:
+        return args_str
+    return (args_str + f" --port {port}").strip()
+
+
 def _model_size_gb(executor, target, model: str) -> float:
     """查目标机上模型文件实际大小（GB），失败返回 0"""
     p = path_join(target, target.models_dir, model)
@@ -478,7 +502,7 @@ def default_args(target_id: str, model: str):
     rec = tune_history.get_latest(target_id, model)
     if rec and rec.get("params"):
         return {
-            "args": _params_to_args_str(rec["params"]),
+            "args": _ensure_port(_params_to_args_str(rec["params"]), target.service_port),
             "source": rec.get("source", "tuner"),
             "score": rec.get("score", 0),
             "ts": rec.get("ts", ""),
@@ -504,7 +528,7 @@ def default_args(target_id: str, model: str):
             ctx_size=8192, cpu_cores=cores, cpu_threads=threads,
         )
         return {
-            "args": _params_to_args_str(gen.get("params", {})),
+            "args": _ensure_port(_params_to_args_str(gen.get("params", {})), target.service_port),
             "source": "generated",
             "score": 0,
             "ts": "",
@@ -512,7 +536,7 @@ def default_args(target_id: str, model: str):
         }
     except Exception as e:
         # 3) 兜底：空参数，让后端用引擎默认
-        return {"args": "", "source": "default", "score": 0, "ts": "", "error": str(e)}
+        return {"args": _ensure_port("", target.service_port), "source": "default", "score": 0, "ts": "", "error": str(e)}
     finally:
         executor.close()
 

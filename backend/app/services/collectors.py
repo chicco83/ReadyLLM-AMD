@@ -28,6 +28,13 @@ def _parse_kv_lines(text: str) -> dict:
     return out
 
 
+def _ps(body: str) -> str:
+    """包装为 powershell -NoProfile -Command "..."。
+    新版 Windows 已移除 wmic，统一改用 Get-CimInstance（Win8+/PS3+ 可用）。
+    body 内只用单引号与 $ 变量，避免与外层双引号冲突。"""
+    return f'powershell -NoProfile -Command "{body}"'
+
+
 # ==================== GPU ====================
 
 def _collect_gpu(executor: Executor, target: Target) -> dict:
@@ -59,9 +66,14 @@ def _collect_gpu(executor: Executor, target: Target) -> dict:
 
 def _collect_cpu_mem(executor: Executor, target: Target) -> dict:
     if target.os == "windows":
-        cmd = ("wmic cpu get LoadPercentage /value && "
-               "wmic OS get TotalVisibleMemorySize,FreePhysicalMemory /value")
-        result = executor.run(cmd, timeout=12)
+        cmd = _ps(
+            "$c=(Get-CimInstance Win32_Processor|Measure-Object LoadPercentage -Average).Average; "
+            "$o=Get-CimInstance Win32_OperatingSystem; "
+            "Write-Output ('LoadPercentage=' + $c); "
+            "Write-Output ('TotalVisibleMemorySize=' + $o.TotalVisibleMemorySize); "
+            "Write-Output ('FreePhysicalMemory=' + $o.FreePhysicalMemory)"
+        )
+        result = executor.run(cmd, timeout=20)
         kv = _parse_kv_lines(result.stdout)
         try:
             total = float(kv.get("TotalVisibleMemorySize", 0))
@@ -285,7 +297,11 @@ def collect_metrics(executor: Executor, target: Target) -> dict:
 def _detect_cpu_static(executor: Executor, target: Target) -> dict:
     if target.os == "windows":
         result = executor.run(
-            "wmic cpu get Name,NumberOfCores,NumberOfLogicalProcessors /value", timeout=10)
+            _ps("$p=Get-CimInstance Win32_Processor; "
+                "Write-Output ('Name=' + $p.Name); "
+                "Write-Output ('NumberOfCores=' + $p.NumberOfCores); "
+                "Write-Output ('NumberOfLogicalProcessors=' + $p.NumberOfLogicalProcessors)"),
+            timeout=20)
         kv = _parse_kv_lines(result.stdout)
         return {
             "name": kv.get("Name", ""),
@@ -315,7 +331,11 @@ def _detect_cpu_static(executor: Executor, target: Target) -> dict:
 
 def _detect_memory_static(executor: Executor, target: Target) -> dict:
     if target.os == "windows":
-        result = executor.run("wmic OS get TotalVisibleMemorySize,FreePhysicalMemory /value", timeout=10)
+        result = executor.run(
+            _ps("$o=Get-CimInstance Win32_OperatingSystem; "
+                "Write-Output ('TotalVisibleMemorySize=' + $o.TotalVisibleMemorySize); "
+                "Write-Output ('FreePhysicalMemory=' + $o.FreePhysicalMemory)"),
+            timeout=20)
         kv = _parse_kv_lines(result.stdout)
         total = float(kv.get("TotalVisibleMemorySize", 0) or 0)
         free = float(kv.get("FreePhysicalMemory", 0) or 0)
@@ -369,7 +389,10 @@ def _detect_disk(executor: Executor, target: Target) -> dict:
     if target.os == "windows":
         drive = target.models_dir[:2] if len(target.models_dir) >= 2 else "C:"
         result = executor.run(
-            f'wmic logicaldisk where "DeviceID=\'{drive}\'" get Size,FreeSpace /value', timeout=8)
+            _ps(f"$d=Get-CimInstance Win32_LogicalDisk | Where-Object DeviceID -eq '{drive}'; "
+                "Write-Output ('Size=' + $d.Size); "
+                "Write-Output ('FreeSpace=' + $d.FreeSpace)"),
+            timeout=20)
         kv = _parse_kv_lines(result.stdout)
         try:
             return {
