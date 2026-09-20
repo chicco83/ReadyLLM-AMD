@@ -26,6 +26,24 @@ export default function Deploy({ targetId, target }) {
   )
 }
 
+/* 记住每台目标机上最后选中的模型：重新打开页面时恢复，而不是每次落到列表第一个 */
+const LAST_MODEL_KEY = 'readyllm:lastModel'
+
+function readLastModel(targetId) {
+  try {
+    const m = JSON.parse(localStorage.getItem(LAST_MODEL_KEY) || '{}')
+    return m[targetId] || ''
+  } catch { return '' }
+}
+
+function writeLastModel(targetId, model) {
+  try {
+    const m = JSON.parse(localStorage.getItem(LAST_MODEL_KEY) || '{}')
+    m[targetId] = model
+    localStorage.setItem(LAST_MODEL_KEY, JSON.stringify(m))
+  } catch { /* 隐私模式等写入失败可忽略 */ }
+}
+
 /* ==================== 文本模型部署（llama.cpp / vLLM） ==================== */
 
 function TextDeploy({ targetId }) {
@@ -51,17 +69,38 @@ function TextDeploy({ targetId }) {
       setModels(list)
       setStatus(st)
       if (md.error) setMsg(md.error)
+      // 选中优先级：运行中模型 > 上次本机选中的（仍在列表中）> 列表第一个
+      const restore = (cur) => {
+        if (cur) return cur
+        const last = readLastModel(targetId)
+        return (last && list.includes(last)) ? last : (list[0] || '')
+      }
       if (st.running && st.model && list.includes(st.model)) {
         setSelected(st.model)
       } else {
-        setSelected(list[0] || '')
+        // StrictMode 双跑时第二次 SSH 探测偶发 running=false：
+        // 仅当尚无选中项时按恢复优先级落值，不得强翻已定选中项
+        setSelected(restore)
       }
     }).catch(() => {
+      // status 探测失败（SSH 抖动等）不代表没在运行：只补拉模型列表、
+      // 保留已有选中，仅未选中时才恢复上次/落到列表第一个
       fetch(`/api/deploy/models?target_id=${targetId}`)
         .then(r => r.json())
-        .then(d => { setModels(d.models || []); setSelected(d.models?.[0] || '') })
+        .then(d => {
+          const list = d.models || []
+          setModels(list)
+          const last = readLastModel(targetId)
+          setSelected((cur) => cur || (last && list.includes(last) ? last : list[0]) || '')
+        })
+        .catch(() => {})
     })
   }, [targetId])
+
+  // 记住每台目标机最后选中的模型，重新打开页面时恢复
+  useEffect(() => {
+    if (targetId && selected) writeLastModel(targetId, selected)
+  }, [targetId, selected])
 
   // 模型选定后拉取默认参数：优先最近调优，回退确定性生成
   useEffect(() => {
@@ -70,15 +109,20 @@ function TextDeploy({ targetId }) {
       setArgsMeta(null)
       return
     }
+    // 过期响应防护：调优参数命中本地记录秒回、未命中需 SSH 现采硬件约 4s，
+    // 模型切换后慢的旧请求不得覆盖新模型的快响应（谁后到谁赢 → 谁最新谁赢）
+    let ignore = false
     setLoadingArgs(true)
     fetch(`/api/deploy/default-args?target_id=${targetId}&model=${encodeURIComponent(selected)}`)
       .then(r => r.json())
       .then(d => {
+        if (ignore) return
         setArgsText(d.args || '')
         setArgsMeta(d)
       })
-      .catch(() => setArgsMeta(null))
-      .finally(() => setLoadingArgs(false))
+      .catch(() => { if (!ignore) setArgsMeta(null) })
+      .finally(() => { if (!ignore) setLoadingArgs(false) })
+    return () => { ignore = true }
   }, [targetId, selected])
 
   // Poll status until `running` flips to the expected value (or timeout).
@@ -258,9 +302,20 @@ function VideoDeploy({ targetId, target }) {
       .then(d => {
         const list = d.models || []
         setModels(list)
-        setSelected(list[0] ? list[0].filename : '')
+        // 恢复上次选中（仍在列表中）> 列表第一个
+        const last = readLastModel(targetId)
+        setSelected((cur) => {
+          if (cur) return cur
+          if (last && list.some((m) => m.filename === last)) return last
+          return list[0] ? list[0].filename : ''
+        })
       })
   }, [targetId])
+
+  // 记住每台目标机最后选中的模型，重新打开页面时恢复
+  useEffect(() => {
+    if (targetId && selected) writeLastModel(targetId, selected)
+  }, [targetId, selected])
 
   // 轮询生成进度
   useEffect(() => {
