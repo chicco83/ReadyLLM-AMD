@@ -23,7 +23,7 @@ Deploy, monitor, and tune large language models through a visual interface — p
 
 Out of the box, ollama often leaves most of your model on the CPU — you get ~10 t/s and a GPU that barely warms up. **ReadyLLM** finds the parameters that actually fit your hardware, squeezes the speed back out, and keeps watching it live.
 
-![Before vs after tuning](docs/benchmark.svg)
+![Before vs after tuning](docs/benchmark-en.svg)
 
 > Same model · same quantization · same context length — peak **+37%**, average **+33%**, 100K context **+50%**.
 
