@@ -210,6 +210,65 @@ def _collect_gpu_amd_linux(executor: Executor) -> dict:
     }
 
 
+# [2026-10-01 v1.1.21] Temperatura GPU su Windows: stessa sorgente di Gestione attivita' (D3DKMTQueryAdapterInfo,
+# KMTQAITYPE_ADAPTERPERFDATA = 62, gdi32.dll). Windows non la espone via WMI/contatori. Il LUID dell'adapter si ricava dai nomi
+# dei contatori GPU (luid_0x<alto>_0x<basso>_phys_0): si sceglie quello con piu' memoria dedicata in uso (la GPU discreta).
+# Lo script C# e' passato con -EncodedCommand (base64 UTF-16LE) per evitare problemi di virgolette. Il risultato e' in cache
+# 5 s (Add-Type costa ~1 s); se non disponibile (driver senza supporto) restituisce 0 e non si riprova per 10 minuti.
+_PS_TEMP_SCRIPT = r"""
+$ErrorActionPreference='Stop'
+Add-Type -TypeDefinition @'
+using System; using System.Runtime.InteropServices;
+public static class GpuT {
+  [StructLayout(LayoutKind.Sequential)] public struct OPEN { public uint Lo; public int Hi; public uint H; }
+  [StructLayout(LayoutKind.Sequential)] public struct QAI { public uint H; public uint Type; public IntPtr Data; public uint Size; }
+  [StructLayout(LayoutKind.Sequential)] public struct CLOSE { public uint H; }
+  [StructLayout(LayoutKind.Sequential, Pack=8)] public struct PERF { public uint Idx; public ulong MF; public ulong MMF; public ulong MMFOC; public ulong MBW; public ulong PBW; public uint Fan; public uint Power; public uint Temp; public byte Pso; }
+  [DllImport("gdi32.dll")] static extern int D3DKMTOpenAdapterFromLuid(ref OPEN o);
+  [DllImport("gdi32.dll")] static extern int D3DKMTQueryAdapterInfo(ref QAI q);
+  [DllImport("gdi32.dll")] static extern int D3DKMTCloseAdapter(ref CLOSE c);
+  public static int Temp(uint lo, int hi) {
+    OPEN o = new OPEN(); o.Lo = lo; o.Hi = hi;
+    if (D3DKMTOpenAdapterFromLuid(ref o) != 0) return -1;
+    int t = -1;
+    IntPtr buf = Marshal.AllocHGlobal(128);
+    try {
+      QAI q = new QAI(); q.H = o.H; q.Type = 62; q.Data = buf; q.Size = (uint)Marshal.SizeOf(typeof(PERF));
+      if (D3DKMTQueryAdapterInfo(ref q) == 0) { PERF p = (PERF)Marshal.PtrToStructure(buf, typeof(PERF)); t = (int)p.Temp; }
+    } finally { Marshal.FreeHGlobal(buf); CLOSE c = new CLOSE(); c.H = o.H; D3DKMTCloseAdapter(ref c); }
+    return t;
+  }
+}
+'@
+$m=Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory | Sort-Object DedicatedUsage -Descending | Select-Object -First 1
+if($m.Name -match 'luid_0x([0-9a-fA-F]+)_0x([0-9a-fA-F]+)'){
+  $hi=[Convert]::ToInt32($matches[1],16); $lo=[Convert]::ToUInt32($matches[2],16)
+  $t=[GpuT]::Temp($lo,$hi)
+  if($t -gt 0){ Write-Output ('GPUTEMP=' + [math]::Round($t/10.0,1)) }
+}
+"""
+_TEMP_CACHE: dict = {}   # chiave target -> (timestamp, valore) ; valore None = non disponibile
+
+
+def _gpu_temp_windows(executor: Executor, target: Target) -> float:
+    """Temperatura GPU in gradi C come Gestione attivita' (0 se non disponibile). Vedi nota v1.1.21."""
+    import base64, time as _t
+    key = getattr(target, "id", None) or "local"
+    ts, val = _TEMP_CACHE.get(key, (0, 0.0))
+    ttl = 600 if val is None else 5
+    if _t.time() - ts < ttl:
+        return val or 0.0
+    enc = base64.b64encode(_PS_TEMP_SCRIPT.encode("utf-16-le")).decode()
+    r = executor.run(f"powershell -NoProfile -EncodedCommand {enc}", timeout=25)
+    kv = _parse_kv_lines(r.stdout)
+    try:
+        val = float(kv.get("GPUTEMP"))
+    except (TypeError, ValueError):
+        val = None
+    _TEMP_CACHE[key] = (_t.time(), val)
+    return val or 0.0
+
+
 def _collect_gpu_windows(executor: Executor, target: Target) -> dict:
     """Monitor realtime su Windows per qualsiasi vendor (AMD/Intel/NVIDIA senza nvidia-smi).
     Usa le classi WMI Win32_PerfFormattedData_GPUPerformanceCounters_*: i NOMI DI CLASSE non
@@ -248,7 +307,8 @@ def _collect_gpu_windows(executor: Executor, target: Target) -> dict:
         "memory_used_gb": round(used / 1024**3, 1),
         "memory_total_gb": static.get("total_memory_gb", 0),
         "memory_pct": round(used / total * 100, 1) if total > 0 else 0,
-        "temperature": 0,
+        # [2026-10-01 v1.1.21] prima: "temperature": 0 (non esposta da Windows); ora da D3DKMT come Gestione attivita'
+        "temperature": round(_gpu_temp_windows(executor, target)),
         "power": 0,
     }
 
