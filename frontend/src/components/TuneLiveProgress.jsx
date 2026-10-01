@@ -16,6 +16,11 @@ export default function TuneLiveProgress({ targetId }) {
   const [showLog, setShowLog] = useState(true)
   const [engineInfo, setEngineInfo] = useState('')
   const lastId = useRef('')
+  // [2026-10-02 v1.1.32] log del motore (llama-server) in diretta durante il tuning + avviso se non arriva nulla da un po':
+  // un avvio lento (es. ROCm che compila i kernel al primo uso, VRAM quasi piena) prima sembrava un blocco.
+  const [engLog, setEngLog] = useState([])
+  const [quietSec, setQuietSec] = useState(0)
+  const lastLogRef = useRef({ text: '', ts: Date.now() })
 
   useEffect(() => {
     if (!targetId) return
@@ -37,6 +42,25 @@ export default function TuneLiveProgress({ targetId }) {
     const id = setInterval(tick, 2000)
     return () => { stop = true; clearInterval(id) }
   }, [targetId])
+
+  useEffect(() => {
+    if (!targetId || !job) { setEngLog([]); setQuietSec(0); return }
+    let stop = false
+    async function tickLog() {
+      try {
+        const d = await (await fetch(`/api/deploy/log?target_id=${targetId}&lines=10`)).json()
+        if (stop) return
+        const lines = d.lines || []
+        setEngLog(lines)
+        const text = lines.join('\n')
+        if (text !== lastLogRef.current.text) lastLogRef.current = { text, ts: Date.now() }
+        setQuietSec(Math.round((Date.now() - lastLogRef.current.ts) / 1000))
+      } catch { /* ignora */ }
+    }
+    tickLog()
+    const id = setInterval(tickLog, 3000)
+    return () => { stop = true; clearInterval(id) }
+  }, [targetId, !!job])
 
   const shown = job || (final && final.job_id !== dismissed ? final : null)
   useEffect(() => {
@@ -82,6 +106,21 @@ export default function TuneLiveProgress({ targetId }) {
           {failed
             ? <span className="text-red">{shown.error || ''}</span>
             : <span className="text-green">{shown.best?.label} · {shown.best?.metrics?.decode} t/s</span>}
+        </div>
+      )}
+      {/* [2026-10-02 v1.1.32] configurazione in prova + log del motore in diretta */}
+      {!done && pr.current && (
+        <div className="mt-2 text-xs text-gray break-all"><b className="text-fg">{t('tune.liveCurrent')}:</b> {pr.current}</div>
+      )}
+      {!done && showLog && (
+        <div className="mt-2">
+          <div className="text-xs text-gray mb-1 flex items-center gap-2">
+            <span>{t('tune.liveEngineLog')}</span>
+            {quietSec >= 45 && <span className="text-yellow">⚠ {t('tune.liveQuiet', { s: quietSec })}</span>}
+          </div>
+          <div className="bg-bg rounded-lg p-2 font-mono text-[11px] text-fg/70 max-h-28 overflow-auto space-y-0.5">
+            {engLog.length === 0 ? <div className="text-gray/50">…</div> : engLog.map((l, i) => <div key={i} className="break-all">{l}</div>)}
+          </div>
         </div>
       )}
       {/* [2026-10-02 v1.1.27] a fine tuning: grafico prima vs dopo, a colpo d'occhio */}

@@ -463,7 +463,7 @@ def _append_log(job_id: str, msg: str):
             job["logs"].append({"t": time.strftime("%H:%M:%S"), "msg": msg})
 
 
-def _set_progress(job_id: str, phase: str = None, total: int = None, step: bool = False):
+def _set_progress(job_id: str, phase: str = None, total: int = None, step: bool = False, current: str = None):
     """[2026-10-01 v1.1.19] Avanzamento per la barra di progresso: fase corrente, prove completate e totale stimato.
     Il totale e' una stima (la fase fine converge in modo dinamico): se le prove superano la stima, il totale si allarga."""
     with _LOCK:
@@ -473,6 +473,8 @@ def _set_progress(job_id: str, phase: str = None, total: int = None, step: bool 
         pr = job.setdefault("progress", {"done": 0, "total": 1, "phase": ""})
         if phase is not None:
             pr["phase"] = phase
+        if current is not None:
+            pr["current"] = current          # [2026-10-02 v1.1.32] configurazione in prova (mostrata sotto la barra)
         if total is not None:
             pr["total"] = max(total, pr["done"])
         if step:
@@ -526,7 +528,7 @@ def _run_one(executor: Executor, target: Target, engine: LlamaCppAdapter,
              tag: str) -> Optional[dict]:
     """Avvia un gruppo di configurazione -> misura -> arresto, restituisce il risultato con le metriche; se l'avvio fallisce restituisce None"""
     label = _cfg_label(cfg)
-    _set_progress(job_id, phase=f"{tag}")
+    _set_progress(job_id, phase=f"{tag}", current=label)
     try:
         return _run_one_inner(executor, target, engine, model_path, cfg, ctx_size, job_id, tag, label)
     finally:
@@ -537,6 +539,9 @@ def _run_one_inner(executor, target, engine, model_path, cfg, ctx_size, job_id, 
     engine.stop()
     time.sleep(2)
     params = StartParams(model_path=model_path, extra_args=_args_list(cfg, target, ctx_size))
+    # [2026-10-02 v1.1.32] la scheda «Decodifica speculativa» del Monitoraggio legge questi parametri anche durante il tuning
+    from .running_args import record as _rec_args
+    _rec_args(target.id, params.extra_args)
     ok, msg = engine.start(params)
     if not ok:
         _append_log(job_id, f"  [{tag}] {label} avvio non riuscito: {msg}")
@@ -566,6 +571,11 @@ def _run_one_inner(executor, target, engine, model_path, cfg, ctx_size, job_id, 
     time.sleep(2)
     _append_log(job_id, f"  [{tag}] {label} → decodifica {metrics['decode']} t/s, "
                         f"prefill {metrics['prefill']} t/s, GPU {metrics['gpu_util']}%")
+    # [2026-10-02 v1.1.32] VRAM quasi piena: su Windows il driver sposta le allocazioni nella memoria condivisa (RAM di sistema) e la
+    # velocita' crolla (visto con ROCm: VRAM 14.8/15.8 GB, decodifica 14 t/s). Lo si segnala nel log, con il suggerimento.
+    if metrics.get("gpu_mem_pct", 0) >= 92:
+        _append_log(job_id, f"    ⚠ VRAM al {metrics['gpu_mem_pct']}%: probabile spill in RAM condivisa, velocita' ridotta. "
+                            "Prova una cache KV piu' piccola (q4_0), un contesto minore o un modello piu' leggero")
     return {"config": cfg, "label": label, "metrics": metrics}
 
 

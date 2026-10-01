@@ -12,7 +12,7 @@ export default function SpecCard({ targetId, acceptRate }) {
     if (!targetId) return
     const load = () => fetch(`/api/deploy/spec?target_id=${targetId}`).then(r => r.json()).then(setInfo).catch(() => {})
     load()
-    const id = setInterval(load, 10000)
+    const id = setInterval(load, 4000)   // [2026-10-02 v1.1.32] piu' frequente: durante il tuning il tipo cambia a ogni prova
     return () => clearInterval(id)
   }, [targetId])
 
