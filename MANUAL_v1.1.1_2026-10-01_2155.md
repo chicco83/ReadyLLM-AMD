@@ -1,6 +1,6 @@
 # MANUALE — ReadyLLM-AMD
 
-Versione: **1.1.0** — 2026-10-01 21:50
+Versione: **1.1.1** — 2026-10-01 21:55
 
 ## 1. Avvio
 ```bash
@@ -45,3 +45,10 @@ Il pulsante in basso nella barra laterale ruota English → Italiano → 中文.
 - *GPU non rilevata*: vedere sezione 4; su Linux verificare che `/sys/class/drm/card*/device/vendor` valga `0x1002`.
 - *Errore «Nessun pacchetto Windows per il backend …»*: l'ultima release di llama.cpp non ha l'asset richiesto o GitHub non è raggiungibile; l'errore elenca gli asset disponibili.
 - *Backend ROCm su Linux*: servono `hipconfig` nel PATH e ROCm ≥ 6.4.
+
+## 8. Installazione di llama.cpp: problemi di rete
+- L'errore reale ora compare nel log di installazione. Se GitHub non è raggiungibile dalla macchina target:
+  1. controllare rete, proxy/firewall e data/ora di sistema;
+  2. impostare la variabile d'ambiente `READYLLM_GH_PROXY` (es. `https://ghfast.top/`) prima di avviare il backend;
+  3. oppure scaricare a mano il pacchetto da https://github.com/ggml-org/llama.cpp/releases (Vulkan: `bin-win-vulkan-x64`,
+     ROCm: `bin-win-hip-radeon-x64`), decomprimerlo e indicare il percorso di `llama-server.exe` in Impostazioni.

@@ -1,8 +1,14 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.0** — 2026-10-01 21:50
+Versione corrente: **1.1.1** — 2026-10-01 21:55
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 3. v1.1.1 — 2026-10-01 21:55 — Installazione llama.cpp più robusta
+- Installazione Windows: TLS 1.2 forzato, User-Agent, ripiego HTML se l'API GitHub fallisce (403/limite/blocco),
+  3 tentativi di download con controllo dimensione, mirror opzionale `READYLLM_GH_PROXY`, DLL `cudart` per il backend CUDA.
+- `_run_step(check=True)` su download/estrazione/clone/compilazione: l'errore reale non è più scartato.
+- Aggiunto `UPSTREAM_PROPOSAL.md` (testo pronto per proporre i fix all'autore originale).
 
 ## 2. v1.1.0 — 2026-10-01 21:50 — Fix target.json, scansione ricorsiva, supporto AMD, scelta backend, italiano
 
@@ -38,7 +44,7 @@ Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in 
   velocità dei nuovi tuning possono differire leggermente da quelle storiche (tokenizzazione diversa).
 
 ### Documentazione
-- Aggiunti `CLAUDE.md`, `CONTEXT_v1.1.0_2026-10-01_2150.md`, `MANUAL_v1.1.0_2026-10-01_2150.md`, questo `CHANGELOG.md`.
+- Aggiunti `CLAUDE.md`, `CONTEXT_v1.1.1_2026-10-01_2155.md`, `MANUAL_v1.1.1_2026-10-01_2155.md`, questo `CHANGELOG.md`.
 
 ## 1. v1.0.0 — baseline (commit c84e8f5)
 - Stato del repository prima di questa sessione (SGLang, i18n en/zh, tuning, monitor, store, ComfyUI).

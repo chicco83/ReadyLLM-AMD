@@ -1,6 +1,6 @@
 # CONTEXT — ReadyLLM-AMD
 
-Versione: **1.1.0** — 2026-10-01 21:50
+Versione: **1.1.1** — 2026-10-01 21:55
 
 ## Scopo
 Assistente di deploy/tuning/monitoraggio per LLM locali (llama.cpp, vLLM, SGLang) e generazione video
@@ -40,3 +40,10 @@ macchina «target» può essere locale o remota via SSH.
 - La VRAM libera su Windows non è disponibile in rilevamento statico (`free_memory_gb` = 0).
 - Test hardware AMD reali da eseguire sul PC con RX 9070 XT (vedi MANUAL, sezione «Verifica GPU AMD»).
 - Le raccomandazioni modelli (`api/hardware.py`) si basano solo sulla VRAM totale.
+
+## Aggiornamento 1.1.1 — installazione llama.cpp (errore di rete)
+Cause probabili dell'errore di rete nell'installazione con un clic su Windows: PowerShell 5.1 senza TLS 1.2 forzato,
+API `api.github.com` bloccata o con limite 60 richieste/ora (403), errore reale scartato. Correzioni in `installer.py`:
+TLS 1.2 + User-Agent, ripiego sulla pagina HTML `releases/expanded_assets/<tag>`, 3 tentativi con verifica dimensione,
+mirror opzionale `READYLLM_GH_PROXY`, `_run_step(check=True)` che propaga l'errore reale, DLL `cudart` per CUDA.
+Proposta all'autore originale: vedere `UPSTREAM_PROPOSAL.md`.
