@@ -1,8 +1,11 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.14** — 2026-10-01 22:44
+Versione corrente: **1.1.15** — 2026-10-01 22:49
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 17. v1.1.15 — 2026-10-01 22:49 — Installazione Windows: asset non trovati
+- Elenco release con tag + log della fonte; ripiego sui nomi standard dei pacchetti ricostruiti dal tag; pattern ROCm `win-rocm`; cudart dal tag.
 
 ## 16. v1.1.14 — 2026-10-01 22:44 — Attiva build, installazione per backend
 - Elenco build installate con pulsante «Attiva» (cambia engine_path automaticamente).

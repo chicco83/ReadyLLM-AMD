@@ -1,6 +1,6 @@
 # MANUALE — ReadyLLM-AMD
 
-Versione: **1.1.14** — 2026-10-01 22:44
+Versione: **1.1.15** — 2026-10-01 22:49
 
 ## 1. Avvio
 Dalla radice del progetto: `python avvia.py` (backend + frontend), `python avvia.py --installa` (installa prima le dipendenze), `python avvia.py --comandi` (stampa i comandi manuali), `--backend` / `--frontend` per avviarne uno solo. Ctrl+C li ferma entrambi. Comandi manuali:
@@ -85,3 +85,6 @@ Sintomi: nel Monitoraggio GPU 0% e VRAM bassa, CPU alta, pochi token/s. Controll
 
 ## 17. Build installate: Attiva / Installa
 Nel pannello «Motori di inferenza», per llama.cpp: elenco delle build trovate (VULKAN, ROCM, CUDA, CPU) con **Attiva** (cambia da solo il percorso del motore); sotto, scegli il backend e premi **Installa** per scaricarne una nuova in `C:\llama\<backend>`. A fine installazione la nuova build diventa quella attiva.
+
+## 18. Installazione: «Nessun pacchetto Windows» 
+Nel log di installazione ora compare «Release bNNNN: N asset (fonte: API GitHub / pagina HTML)» oppure «uso il tag ... e i nomi standard». Se il download fallisce con 404/errore di rete, il log elenca ogni URL provato. Con `READYLLM_GH_PROXY` si puo' usare un mirror di GitHub.
