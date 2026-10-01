@@ -83,6 +83,8 @@ function TextDeploy({ targetId, embedded = false }) {
   // [2026-10-01 v1.1.12] Log del motore (la finestra della shell e' nascosta): si aggiorna ogni 3 s quando e' aperto
   const [showLog, setShowLog] = useState(false)
   const [logLines, setLogLines] = useState([])
+  const [offload, setOffload] = useState(null) // {done, total} da "offloaded N/M layers to GPU"
+  const [gpuDevices, setGpuDevices] = useState([])
 
   useEffect(() => {
     if (!targetId) return
@@ -189,14 +191,18 @@ function TextDeploy({ targetId, embedded = false }) {
   }
 
   useEffect(() => {
-    if (!showLog || !targetId) return
+    // [2026-10-01 v1.1.13] il log si legge anche a motore acceso (ogni 5 s) per avvisare se la GPU non e' usata
+    if ((!showLog && !status?.running) || !targetId) return
     let alive = true
     const load = () => fetch(`/api/deploy/log?target_id=${targetId}`)
-      .then(r => r.json()).then(d => { if (alive) setLogLines(d.lines || []) }).catch(() => {})
+      .then(r => r.json()).then(d => {
+        if (!alive) return
+        setLogLines(d.lines || []); setOffload(d.offload || null); setGpuDevices(d.gpu_devices || [])
+      }).catch(() => {})
     load()
-    const id = setInterval(load, 3000)
+    const id = setInterval(load, showLog ? 3000 : 5000)
     return () => { alive = false; clearInterval(id) }
-  }, [showLog, targetId])
+  }, [showLog, targetId, status?.running])
 
   function resetArgs() {
     if (!targetId || !selected) return
@@ -294,6 +300,16 @@ function TextDeploy({ targetId, embedded = false }) {
         </div>
 
         {msg && <div className="mt-4 text-sm text-gray">{msg}</div>}
+
+        {/* [2026-10-01 v1.1.13] Avviso: GPU non usata (0 strati su GPU, oppure nessun dispositivo GPU nel log) */}
+        {status?.running && offload && offload.done === 0 && (
+          <div className="mt-4 p-3 rounded-lg bg-yellow/10 text-yellow text-sm border border-yellow/30">
+            {t('deploy.gpuNotUsed', { done: offload.done, total: offload.total })}
+          </div>
+        )}
+        {status?.running && offload && offload.done > 0 && (
+          <div className="mt-4 text-xs text-green">{t('deploy.gpuUsed', { done: offload.done, total: offload.total })}</div>
+        )}
 
         {/* [2026-10-01 v1.1.12] Log del motore: llama-server gira senza finestra visibile, l'output e' nel file di log */}
         <div className="mt-4">

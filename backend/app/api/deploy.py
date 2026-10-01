@@ -75,11 +75,24 @@ def _get_running(target_id: str) -> str:
 @router.get("/log")
 def engine_log(target_id: str, lines: int = 40):
     """[2026-10-01 v1.1.12] Ultime righe del log di llama-server (Windows: C:\\temp\\llama_server.log, Linux: /tmp/llama_server.log):
-    permette di vedere cosa fa il motore ora che la finestra della shell e' nascosta."""
+    permette di vedere cosa fa il motore ora che la finestra della shell e' nascosta.
+
+    [2026-10-01 v1.1.13] In piu' analizza il log per capire se la GPU e' usata davvero:
+      - "offloaded N/M layers to GPU" -> offload {done, total} (N=0: il modello gira tutto su CPU)
+      - dispositivi GPU citati (Vulkan0, ROCm0, CUDA0...) -> gpu_devices
+    """
+    import re
     target, executor, _ = _adapter(target_id)
     try:
         from ..services.tuner import _log_server_tail
-        return {"lines": _log_server_tail(executor, target, max(1, min(lines, 200)))}
+        tail = _log_server_tail(executor, target, 300)
+        offload = None
+        for ln in tail:
+            m = re.search(r"offloaded\s+(\d+)\s*/\s*(\d+)\s+layers\s+to\s+GPU", ln, re.I)
+            if m:
+                offload = {"done": int(m.group(1)), "total": int(m.group(2))}
+        gpu_devices = [ln.strip() for ln in tail if re.search(r"(Vulkan|ROCm|HIP|CUDA|Metal)\d*\s*:", ln)][:4]
+        return {"lines": tail[-max(1, min(lines, 200)):], "offload": offload, "gpu_devices": gpu_devices}
     finally:
         executor.close()
 
