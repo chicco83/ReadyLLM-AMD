@@ -1,8 +1,11 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.8** — 2026-10-01 22:20
+Versione corrente: **1.1.9** — 2026-10-01 22:21
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 11. v1.1.9 — 2026-10-01 22:21 — Monitoraggio e tuning unificati
+- Il tuning intelligente e' una sezione della pagina Monitoraggio; rimosse la voce di menu e la pagina separata. Etichetta menu: «Monitoraggio e tuning» (en/it/zh).
 
 ## 10. v1.1.8 — 2026-10-01 22:20 — Tuning su Windows
 - Dimensione modello rilevata correttamente (era 0.0 GB).

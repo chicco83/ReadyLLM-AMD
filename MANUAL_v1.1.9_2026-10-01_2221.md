@@ -1,6 +1,6 @@
 # MANUALE — ReadyLLM-AMD
 
-Versione: **1.1.8** — 2026-10-01 22:20
+Versione: **1.1.9** — 2026-10-01 22:21
 
 ## 1. Avvio
 Dalla radice del progetto: `python avvia.py` (backend + frontend), `python avvia.py --installa` (installa prima le dipendenze), `python avvia.py --comandi` (stampa i comandi manuali), `--backend` / `--frontend` per avviarne uno solo. Ctrl+C li ferma entrambi. Comandi manuali:
@@ -62,3 +62,6 @@ Se la VRAM e' errata esegui `python avvia.py --diagnosi-gpu` e invia l'output (m
 
 ## 11. Il tuning non parte / timeout di avvio
 1. Riavvia SEMPRE il backend dopo un `git pull` (Ctrl+C e `python avvia.py`). 2. Nel log del tuning compaiono ora le righe `[llama-server]` con la causa reale (parametro non supportato, VRAM, DLL mancanti). 3. Il log completo e' in `C:\temp\llama_server.log`.
+
+## 12. Monitoraggio e tuning in una sola pagina
+La pagina «Monitoraggio e tuning» mostra in alto GPU/CPU/metriche e in basso il tuning (schede Automatico / AI), cosi' si osserva la macchina mentre il tuning gira.

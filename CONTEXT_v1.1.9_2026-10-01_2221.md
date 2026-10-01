@@ -1,6 +1,6 @@
 # CONTEXT — ReadyLLM-AMD
 
-Versione: **1.1.8** — 2026-10-01 22:20
+Versione: **1.1.9** — 2026-10-01 22:21
 
 ## Scopo
 Assistente di deploy/tuning/monitoraggio per LLM locali (llama.cpp, vLLM, SGLang) e generazione video
@@ -68,3 +68,6 @@ Verificato sulla RX 9070 XT reale: VRAM 15.8 GiB da `DedicatedVideoMemory` (Dire
 
 ## Aggiornamento 1.1.8 — tuning su Windows
 Test di tuning fallito: VRAM 4.0 GB (backend avviato prima del fix, senza riavvio: uvicorn gira senza --reload), dimensione modello 0.0 GB (comando PowerShell fragile) e timeout di avvio senza diagnosi (output di llama-server perso su Windows). Correzioni: dimensione modello robusta, log in `C:\temp\llama_server.log` con ultime righe nel log del tuning, attesa avvio 300 s.
+
+## Aggiornamento 1.1.9 — UI
+Il tuning intelligente (automatico + AI) e' una sezione della pagina Monitoraggio (`Monitor.jsx` include `<Tune embedded />`); la voce di menu «Tuning intelligente» e la route `tune` sono state rimosse.
