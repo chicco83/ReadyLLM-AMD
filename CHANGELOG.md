@@ -1,8 +1,13 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.9** — 2026-10-01 22:21
+Versione corrente: **1.1.10** — 2026-10-01 22:24
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 12. v1.1.10 — 2026-10-01 22:24 — Backend del motore e selezione percorsi
+- Rilevamento del backend del llama-server installato (Vulkan/ROCm/CUDA/CPU) con elenco dispositivi, mostrato in Impostazioni.
+- Installazione in cartelle separate per backend.
+- Pulsanti «Sfoglia…» con finestra nativa di Windows per percorso del motore e cartella dei modelli (solo target locali).
 
 ## 11. v1.1.9 — 2026-10-01 22:21 — Monitoraggio e tuning unificati
 - Il tuning intelligente e' una sezione della pagina Monitoraggio; rimosse la voce di menu e la pagina separata. Etichetta menu: «Monitoraggio e tuning» (en/it/zh).

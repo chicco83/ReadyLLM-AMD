@@ -1,6 +1,6 @@
 # MANUALE — ReadyLLM-AMD
 
-Versione: **1.1.9** — 2026-10-01 22:21
+Versione: **1.1.10** — 2026-10-01 22:24
 
 ## 1. Avvio
 Dalla radice del progetto: `python avvia.py` (backend + frontend), `python avvia.py --installa` (installa prima le dipendenze), `python avvia.py --comandi` (stampa i comandi manuali), `--backend` / `--frontend` per avviarne uno solo. Ctrl+C li ferma entrambi. Comandi manuali:
@@ -65,3 +65,8 @@ Se la VRAM e' errata esegui `python avvia.py --diagnosi-gpu` e invia l'output (m
 
 ## 12. Monitoraggio e tuning in una sola pagina
 La pagina «Monitoraggio e tuning» mostra in alto GPU/CPU/metriche e in basso il tuning (schede Automatico / AI), cosi' si osserva la macchina mentre il tuning gira.
+
+## 13. Percorsi e backend del motore
+- In Impostazioni, accanto a «Percorso del motore» e «Cartella dei modelli» c'e' il pulsante **Sfoglia…** (solo target locale): apre la finestra standard di Windows.
+- Nel pannello «Motori di inferenza» compare il **backend rilevato** (VULKAN / ROCM / CUDA / CPU) con i dispositivi.
+- Puoi avere piu' installazioni (es. `C:\llama\vulkan` e `C:\llama\rocm`) e scegliere quale usare con «Sfoglia…» sul percorso del motore.

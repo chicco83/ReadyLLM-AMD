@@ -1,6 +1,6 @@
 # CONTEXT — ReadyLLM-AMD
 
-Versione: **1.1.9** — 2026-10-01 22:21
+Versione: **1.1.10** — 2026-10-01 22:24
 
 ## Scopo
 Assistente di deploy/tuning/monitoraggio per LLM locali (llama.cpp, vLLM, SGLang) e generazione video
@@ -71,3 +71,8 @@ Test di tuning fallito: VRAM 4.0 GB (backend avviato prima del fix, senza riavvi
 
 ## Aggiornamento 1.1.9 — UI
 Il tuning intelligente (automatico + AI) e' una sezione della pagina Monitoraggio (`Monitor.jsx` include `<Tune embedded />`); la voce di menu «Tuning intelligente» e la route `tune` sono state rimosse.
+
+## Aggiornamento 1.1.10 — motore e selezione percorsi
+- `installer.detect_llama_backends`: backend del llama-server installato da (1) `ggml-*.dll`/`libggml-*.so` accanto all'eseguibile e (2) `llama-server --list-devices` (dispositivi effettivi, indizio prioritario). Esposto in `/api/target/<id>/engine` come `backend`, `backends`, `devices`.
+- Installazione per backend in cartelle separate (`C:\llama\<backend>` su Windows, `/tmp/llama.cpp-<backend>` su Linux).
+- `POST /api/target/pick`: finestra nativa Tkinter (file/cartella) aperta dal backend; valido solo per target locali. Non verificato su Windows reale.
