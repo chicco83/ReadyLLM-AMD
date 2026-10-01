@@ -110,7 +110,8 @@ def engines_installed(target_id: str):
 
 
 class ActivateRequest(BaseModel):
-    path: str
+    path: Optional[str] = None            # [2026-10-01 v1.1.17] opzionale (es. backend «auto»: si cambia solo llama_backend)
+    llama_backend: Optional[str] = None
 
 
 @router.post("/{target_id}/activate-engine")
@@ -119,7 +120,10 @@ def activate_engine(target_id: str, req: ActivateRequest):
     target = get_target(target_id)
     if not target:
         return {"ok": False, "message": "Macchina target inesistente"}
-    target.engine_path = req.path
+    if req.path:
+        target.engine_path = req.path
+    if req.llama_backend:
+        target.llama_backend = req.llama_backend
     targets = upsert_target(target)
     return {"ok": True, "targets": [t.to_dict() for t in targets]}
 
