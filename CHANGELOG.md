@@ -1,8 +1,14 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.27** — 2026-10-02 03:00
+Versione corrente: **1.1.28** — 2026-10-02 03:40
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 30. v1.1.28 — 2026-10-02 03:40 — Tuning: miglioramenti dalla ricerca online (AMD/Windows)
+- **Sonda flash-attention** nella fase fine (`--flash-attn on/off`): su Vulkan/AMD il kernel FA puo' essere piu' lento. Applicabile solo con KV cache f16 (la cache quantizzata richiede FA): altrimenti saltata con nota nel log. Vince solo con +3% (`NOISE_MARGIN`).
+- **ubatch-size 64** aggiunto alla griglia (il valore di partenza resta 256).
+- **Obiettivo Coding:** a tutte le prove (baseline compresa) si aggiungono `--parallel 1 --cache-reuse 256` (un solo slot con tutto il contesto, riuso della cache del prefisso: con 4 slot `--ctx-size` si divide e l'hit rate restava 0) e il prefill e' misurato anche su un prompt da ~16k token (richiede contesto >= 20000), usato nel punteggio al posto di quello da ~2400. Il grafico prima/dopo mostra il prefill lungo.
+- Fonti: discussioni llama.cpp #15021, #12629, #11681, #13606, #21112 e blog di confronto Vulkan/ROCm su RDNA4.
 
 ## 29. v1.1.27 — 2026-10-02 03:00 — Tuning multi-motore, applica+riavvia, prima/dopo, obiettivo Coding
 - **Altri motori:** opzione «Prova anche gli altri motori installati» (visibile con 2+ build GPU, es. Vulkan e ROCm): a fine tuning la configurazione migliore e' rimisurata con le altre build; il motore cambia solo se e' almeno il 3% piu' veloce. Le build non utilizzabili con la configurazione sono saltate.

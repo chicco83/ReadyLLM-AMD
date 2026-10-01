@@ -126,3 +126,5 @@ Rimossa da `EngineRow` la sezione «Build installate / Attiva / Installa»; spos
 - v1.1.26: `tune_history.score` ora = decodifica t/s (tuner._finalize e Tune.saveBest); il punteggio composito resta solo in tune_log/risultati.
 
 - v1.1.27: `tuner._alt_engines/_try_other_engines` (dataclasses.replace(target, engine_path=...)); `try_engines` in TuneRequest; `POST /api/tune/apply`; `GOAL_WEIGHTS['coding']`; componente `BeforeAfter`; i risultati portano il campo `engine`.
+
+- v1.1.28: `_goal_extras` (parallel/cache-reuse per coding), `_BENCH_XLONG_PROMPT` + metrica `prefill_long`, `_score` usa prefill_long per coding, sonda flash-attn in `_fine_search`, `NOISE_MARGIN` costante, ubatch grid con 64 (indice 256 = [2]).

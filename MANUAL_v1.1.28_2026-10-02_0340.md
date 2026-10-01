@@ -127,3 +127,8 @@ Il numero accanto a «Precompilato dal tuning automatico» e' la velocita' di de
 
 ## 27. Tuning multi-motore e applicazione (v1.1.27)
 Con piu' build GPU installate (Impostazioni → Motori di inferenza) compare «Prova anche gli altri motori installati»: la configurazione migliore viene rimisurata con ogni altra build (es. ROCm contro Vulkan) e il motore cambia solo se vince di almeno il 3%. «Salva e applica» salva, cambia motore se serve e riavvia il modello con la configurazione consigliata. Il grafico «Prima/Dopo» confronta decodifica, prefill e TTFT con la variazione percentuale.
+
+## 28. Cosa misura il tuning (v1.1.28)
+- Obiettivo **Coding e agenti**: ogni prova usa `--parallel 1 --cache-reuse 256`; il prefill e' misurato anche su ~16k token (serve un contesto di almeno 20000; sotto, resta solo la misura da ~2400). Il tempo di ogni prova cresce di qualche secondo.
+- Fase fine: oltre a batch/ubatch/threads/draft si prova `flash-attn` acceso/spento (solo con cache f16; con cache quantizzata la flash attention e' obbligatoria).
+- Limite noto: il benchmark usa richieste indipendenti, quindi il beneficio reale di `--cache-reuse` (stesso prefisso a ogni richiesta dell'agente) non e' misurato ma e' applicato.
