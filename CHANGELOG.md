@@ -1,8 +1,13 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.24** — 2026-10-02 01:20
+Versione corrente: **1.1.25** — 2026-10-02 01:50
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 27. v1.1.25 — 2026-10-02 01:50 — Tuning: mai consigliare una config peggiore della baseline
+- Bug: veniva consigliato il risultato dell'ultima fase (fine) anche se piu' lento della baseline (68.23 -> 65.5 t/s, -4%): la stessa riga misurata tre volte dava 68.2/66.0/65.5 per rumore di misura.
+- Ora la raccomandazione e' la migliore misura tra baseline, coarse e fine; una variante sostituisce la baseline solo se la supera di almeno il 3% (margine di rumore), altrimenti resta la tua configurazione con avviso nel log.
+- Le combinazioni coarse identiche alla baseline riusano la sua misura; una sola riga marcata «consigliata».
 
 ## 26. v1.1.24 — 2026-10-02 01:20 — Storico ottimizzazioni + fix temperatura GPU
 - Nuova pagina «Storico ottimizzazioni» (menu laterale): una riga per ogni tuning concluso con data, modello (e dimensione), motore (backend + versione), GPU, decodifica/prefill, guadagno vs baseline, contesto, durata; dettaglio con TTFT, uso GPU, punteggio, prove, parametri consigliati e baseline, percorso motore. Filtri per testo/esito/macchina, eliminazione voce.

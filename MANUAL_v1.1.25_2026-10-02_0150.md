@@ -112,3 +112,6 @@ A fine tuning la barra resta visibile con l'esito; «Vedi risultati» apre il pa
 
 ## 23. Storico delle ottimizzazioni (v1.1.24)
 Voce di menu «Storico ottimizzazioni»: elenca tutti i tuning conclusi (anche falliti), dal piu' recente. Colonne: data, modello, motore (backend + versione), GPU, decodifica, prefill, variazione rispetto alla baseline, contesto, durata; la decodifica migliore e' in verde. Clic su una riga per i dettagli (parametri consigliati da incollare nel Deploy, baseline, TTFT, uso GPU). Si puo' filtrare e cancellare una voce con il cestino. Lo storico parte dai tuning eseguiti dopo questo aggiornamento. Dati in `~/.model-deploy-assistant/tune_log.json`.
+
+## 24. Come sceglie il tuning (v1.1.25)
+La configurazione consigliata e' la migliore per punteggio tra baseline e prove; una variante prevale sulla tua configurazione solo se e' migliore di almeno il 3% (le misure hanno rumore di qualche punto percentuale). Se nessuna variante vince, resta consigliata la configurazione attuale. La tabella «Tutti i record dei test» e' lo storico della singola esecuzione; lo «Storico ottimizzazioni» nel menu raccoglie tutte le esecuzioni.
