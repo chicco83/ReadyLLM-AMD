@@ -103,3 +103,6 @@ Durante il tuning, sotto i grafici del Monitoraggio compare una barra con la fas
 
 ## 20. Temperatura GPU (v1.1.21)
 Su Windows la temperatura nel Monitoraggio e' letta come in Gestione attivita'. Se mostra «--» il driver non espone il dato (o la lettura e' fallita).
+
+## 21. Motore nella barra (v1.1.22)
+La barra di progresso del tuning riporta al centro backend e versione del motore in uso.

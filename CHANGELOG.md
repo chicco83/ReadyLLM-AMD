@@ -1,8 +1,11 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.21** — 2026-10-02 00:10
+Versione corrente: **1.1.22** — 2026-10-02 00:20
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 24. v1.1.22 — 2026-10-02 00:20 — Motore nella barra di progresso
+- Al centro della barra di progresso del tuning compaiono backend e versione del motore (es. «ROCM — version: 0.5.0-dev (build 11327, commit 552f18f91)»).
 
 ## 23. v1.1.21 — 2026-10-02 00:10 — Temperatura GPU su Windows
 - Il Monitoraggio legge la temperatura dalla stessa sorgente di Gestione attivita' (`D3DKMTQueryAdapterInfo`, ADAPTERPERFDATA) via PowerShell; cache 5 s, se non supportata dal driver resta «--» (non si riprova per 10 min). Da verificare sul PC reale.

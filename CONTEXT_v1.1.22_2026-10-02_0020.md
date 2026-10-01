@@ -114,3 +114,5 @@ Rimossa da `EngineRow` la sezione «Build installate / Attiva / Installa»; spos
 - v1.1.20: `_args_list` omette `spec-type` se off/none; `tuner._set_progress` + campo `progress` nei job; componente `TuneLiveProgress` in Monitor.
 
 - v1.1.21: `collectors._gpu_temp_windows` (script C# P/Invoke gdi32 D3DKMTQueryAdapterInfo tipo 62, LUID dai contatori GPUAdapterMemory, -EncodedCommand, cache).
+
+- v1.1.22: `TuneLiveProgress` legge `GET /api/target/<id>/engine` (backend + version) e lo mostra nella barra.
