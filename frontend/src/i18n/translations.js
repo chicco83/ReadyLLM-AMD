@@ -5,7 +5,8 @@
 export const translations = {
   en: {
     // ===== Navigazione / marchio / globale =====
-    'nav.monitor': 'Real-time Monitor',
+    // [2026-10-01 v1.1.9] etichetta aggiornata (era: 'nav.monitor': 'Real-time Monitor')
+    'nav.monitor': 'Monitor & Tuning',
     'nav.store': 'Model Store',
     'nav.deploy': 'Deploy',
     'nav.tune': 'Smart Tuning',
@@ -330,7 +331,8 @@ export const translations = {
 
   // [v1.1.0 2026-10-01] Italiano: traduzione completa delle chiavi inglesi (senza chiavi duplicate)
   it: {
-    'nav.monitor': 'Monitoraggio in tempo reale',
+    // [2026-10-01 v1.1.9] etichetta aggiornata (era: 'nav.monitor': 'Monitoraggio in tempo reale')
+    'nav.monitor': 'Monitoraggio e tuning',
     'nav.store': 'Negozio modelli',
     'nav.deploy': 'Deploy',
     'nav.tune': 'Tuning intelligente',
@@ -606,7 +608,8 @@ export const translations = {
   },
   zh: {
     // ===== Navigazione / marchio / globale =====
-    'nav.monitor': '实时监控',
+    // [2026-10-01 v1.1.9] etichetta aggiornata (era: '实时监控')
+    'nav.monitor': '监控与调优',
     'nav.store': '模型商店',
     'nav.deploy': '部署',
     'nav.tune': '智能调优',

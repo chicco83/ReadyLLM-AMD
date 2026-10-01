@@ -563,13 +563,16 @@ function AITune({ targetId }) {
 
 // ==================== Componente principale ====================
 
-export default function Tune({ targetId }) {
+// [2026-10-01 v1.1.9] embedded=true: usato dentro la pagina Monitoraggio (titolo di sezione al posto del titolo di pagina)
+export default function Tune({ targetId, embedded = false }) {
   const { t } = useI18n()
   const [tab, setTab] = useState('auto') // auto | ai
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-6">{t('tune.title')}</h1>
+      {embedded
+        ? <h2 className="text-lg font-bold mb-4">{t('tune.title')}</h2>
+        : <h1 className="text-2xl font-bold mb-6">{t('tune.title')}</h1>}
 
       {/* Cambio scheda */}
       <div className="flex gap-1 mb-6 bg-card rounded-lg p-1 border border-gray/30 max-w-xs">
