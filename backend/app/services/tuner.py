@@ -168,7 +168,9 @@ def _fits_vram(cfg: dict, model_size_gb: float, ctx_size: int, gpu_vram_gb: floa
 
 # ==================== Misura della velocita' ====================
 
-def _wait_ready(executor: Executor, target: Target, timeout: int = 120) -> bool:
+# [2026-10-01 v1.1.8] timeout 120 -> 300 s: un modello Q8_0 letto da disco lento / Drive puo' superare 2 minuti
+# Versione precedente: timeout: int = 120
+def _wait_ready(executor: Executor, target: Target, timeout: int = 300) -> bool:
     """Fa polling su /health della macchina target finche' il servizio e' pronto"""
     deadline = time.time() + timeout
     cmd = (f'curl -s -o /dev/null -w "%{{http_code}}" --max-time 3 '
@@ -364,9 +366,14 @@ def _run_one(executor: Executor, target: Target, engine: LlamaCppAdapter,
     ok, msg = engine.start(params)
     if not ok:
         _append_log(job_id, f"  [{tag}] {label} avvio non riuscito: {msg}")
+        for ln in _log_server_tail(executor, target):
+            _append_log(job_id, f"    [llama-server] {ln}")
         return None
     if not _wait_ready(executor, target):
         _append_log(job_id, f"  [{tag}] {label} timeout di avvio (forse VRAM insufficiente)")
+        # [2026-10-01 v1.1.8] mostra il log di llama-server: indica la causa reale dell'errore
+        for ln in _log_server_tail(executor, target):
+            _append_log(job_id, f"    [llama-server] {ln}")
         engine.stop()
         return None
     metrics = _bench_median(executor, target, ctx_size)
@@ -570,17 +577,37 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
 
 
 def _get_model_size_gb(executor: Executor, target: Target, model_path: str) -> float:
-    """Rileva la dimensione reale (GB) del file del modello sulla macchina target, per la pre-verifica della VRAM"""
+    """Rileva la dimensione reale (GB) del file del modello sulla macchina target, per la pre-verifica della VRAM
+
+    [2026-10-01 v1.1.8] Su Windows la dimensione risultava 0.0 GB: il comando originale (if(Test-Path)...) e' fragile
+    con le virgolette passate da cmd. Ora: Get-Item -LiteralPath, e in caso di fallimento ripiego su cmd (%~z).
+    # Versione precedente (2026-10-01, sostituita):
+    # cmd = (f'powershell -Command "if(Test-Path \\'{model_path}\\')'
+    #        f'{(chr(123))}(Get-Item \\'{model_path}\\').Length{(chr(125))}else{{0}}"')
+    """
     if target.os == "windows":
-        cmd = (f'powershell -Command "if(Test-Path \'{model_path}\')'
-               f'{(chr(123))}(Get-Item \'{model_path}\').Length{(chr(125))}else{{0}}"')
+        cmds = [f'powershell -NoProfile -Command "(Get-Item -LiteralPath \'{model_path}\').Length"',
+                f'for %I in ("{model_path}") do @echo %~zI']
     else:
-        cmd = f'stat -c %s "{model_path}" 2>/dev/null || echo 0'
-    r = executor.run(cmd, timeout=10)
-    digits = "".join(c for c in r.stdout if c.isdigit())
-    if digits:
-        return round(int(digits) / (1024 ** 3), 1)
+        cmds = [f'stat -c %s "{model_path}" 2>/dev/null || echo 0']
+    for cmd in cmds:
+        r = executor.run(cmd, timeout=15)
+        tok = (r.stdout or "").split()
+        digits = "".join(c for c in (tok[-1] if tok else "") if c.isdigit())
+        if digits and int(digits) > 0:
+            return round(int(digits) / (1024 ** 3), 1)
     return 0.0
+
+
+def _log_server_tail(executor: Executor, target: Target, righe: int = 12) -> list:
+    """[2026-10-01 v1.1.8] Ultime righe del log di llama-server (Windows: C:\\temp\\llama_server.log, Linux: /tmp/llama_server.log),
+    per capire PERCHE' l'avvio e' fallito (parametro non supportato, VRAM, DLL mancanti...)."""
+    if target.os == "windows":
+        cmd = f'powershell -NoProfile -Command "Get-Content -Tail {righe} C:\\temp\\llama_server.log"'
+    else:
+        cmd = f"tail -n {righe} /tmp/llama_server.log 2>/dev/null"
+    r = executor.run(cmd, timeout=10)
+    return [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
 
 
 def _get_gpu_vram(executor: Executor, target: Target) -> float:

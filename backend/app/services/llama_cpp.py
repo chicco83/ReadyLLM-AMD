@@ -54,7 +54,10 @@ class LlamaCppAdapter(EngineAdapter):
         return self._start_linux(exe, model_path, args_str)
 
     def _start_windows(self, exe: str, model_path: str, args_str: str) -> tuple[bool, str]:
-        bat_content = f'@echo off\r\n"{exe}" --model "{model_path}" {args_str}\r\n'
+        # [2026-10-01 v1.1.8] Output di llama-server su C:\\temp\\llama_server.log (come su Linux): prima andava perso
+        # e non si capiva perche' l'avvio falliva. Versione precedente:
+        # bat_content = f'@echo off\r\n"{exe}" --model "{model_path}" {args_str}\r\n'
+        bat_content = f'@echo off\r\n"{exe}" --model "{model_path}" {args_str} > C:\\temp\\llama_server.log 2>&1\r\n'
         b64 = base64.b64encode(bat_content.encode("gbk")).decode("ascii")
         bat_path = r"C:\temp\llama_start.bat"
 
