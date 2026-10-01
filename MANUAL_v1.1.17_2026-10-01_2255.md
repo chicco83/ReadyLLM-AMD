@@ -1,6 +1,6 @@
 # MANUALE — ReadyLLM-AMD
 
-Versione: **1.1.16** — 2026-10-01 22:50
+Versione: **1.1.17** — 2026-10-01 22:55
 
 ## 1. Avvio
 Dalla radice del progetto: `python avvia.py` (backend + frontend), `python avvia.py --installa` (installa prima le dipendenze), `python avvia.py --comandi` (stampa i comandi manuali), `--backend` / `--frontend` per avviarne uno solo. Ctrl+C li ferma entrambi. Comandi manuali:
@@ -83,8 +83,8 @@ Se la VRAM e' errata esegui `python avvia.py --diagnosi-gpu` e invia l'output (m
 ## 16. La GPU non viene usata
 Sintomi: nel Monitoraggio GPU 0% e VRAM bassa, CPU alta, pochi token/s. Controlli: (1) Impostazioni → «Motori di inferenza» → **Backend rilevato** deve essere VULKAN (o ROCM) per la Radeon; se e' CPU/CUDA, installa llama.cpp con backend Vulkan (Impostazioni → Backend di llama.cpp: Vulkan → Installa) e punta il percorso del motore a `C:\llama\vulkan\llama-server.exe` con «Sfoglia…». (2) Nel Deploy, «Log del motore»: cerca `offloaded N/M layers to GPU`; N deve essere uguale a M. (3) Il Deploy mostra un avviso giallo se 0 strati sono su GPU.
 
-## 17. Build installate: Attiva / Installa
-Nel pannello «Motori di inferenza», per llama.cpp: elenco delle build trovate (VULKAN, ROCM, CUDA, CPU) con **Attiva** (cambia da solo il percorso del motore); sotto, scegli il backend e premi **Installa** per scaricarne una nuova in `C:\llama\<backend>`. A fine installazione la nuova build diventa quella attiva.
+## 17. Backend, build installate e installazione (v1.1.17: unificati)
+I pulsanti **Backend di llama.cpp** (Auto / CUDA / ROCm / Vulkan / CPU) del modulo sono il solo comando: ogni pulsante indica se la build e' installata; cliccarlo la mette in uso (cambia da solo il percorso del motore e salva); se non e' installata compare **Installa** con i log. A fine installazione la build diventa quella in uso. Serve una macchina gia' salvata. Il pannello «Motori di inferenza» in basso mostra solo stato, versione e backend rilevato.
 
 ## 18. Installazione: «Nessun pacchetto Windows» 
 Nel log di installazione ora compare «Release bNNNN: N asset (fonte: API GitHub / pagina HTML)» oppure «uso il tag ... e i nomi standard». Se il download fallisce con 404/errore di rete, il log elenca ogni URL provato. Con `READYLLM_GH_PROXY` si puo' usare un mirror di GitHub.

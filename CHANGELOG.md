@@ -1,8 +1,11 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.16** — 2026-10-01 22:50
+Versione corrente: **1.1.17** — 2026-10-01 22:55
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 19. v1.1.17 — 2026-10-01 22:55 — Backend, attivazione e installazione unificati
+- I pulsanti del backend mostrano lo stato (installato / non installato), mettono in uso la build al click e propongono l'installazione con log; rimossa la sezione duplicata sotto «Motori di inferenza».
 
 ## 18. v1.1.16 — 2026-10-01 22:50 — Release scelta per l'installazione
 - `/releases/latest` puntava a v0.5.0 (1 asset, non binario): ora si usa l'elenco delle release e si sceglie la prima con pacchetti `bin-win`.

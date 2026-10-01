@@ -1,6 +1,6 @@
 # CONTEXT — ReadyLLM-AMD
 
-Versione: **1.1.16** — 2026-10-01 22:50
+Versione: **1.1.17** — 2026-10-01 22:55
 
 ## Scopo
 Assistente di deploy/tuning/monitoraggio per LLM locali (llama.cpp, vLLM, SGLang) e generazione video
@@ -100,3 +100,6 @@ Segnalazione: «Nessun pacchetto Windows per il backend cpu... Asset Windows dis
 
 ## Aggiornamento 1.1.16 — release «latest» sbagliata
 Dal log dell'utente: `/releases/latest` di ggml-org/llama.cpp restituisce il tag `v0.5.0` con 1 solo asset (non binario), mentre i pacchetti sono nelle release `bNNNNN` (es. b11327). Ora `_win_release_urls` legge `releases?per_page=20` e sceglie la prima release (dalla piu' recente) con almeno un asset `bin-win`; ripiego sulla pagina HTML delle release (primo tag `bNNNN`, expanded_assets) e sui nomi standard. Anche l'estrazione cudart parte dal tag corretto.
+
+## Aggiornamento 1.1.17 — UI coerente per backend/installazione
+Rimossa da `EngineRow` la sezione «Build installate / Attiva / Installa»; spostata nel form sotto i pulsanti del backend (`pickBackend`, `installBackend`, `buildFor` in `Settings.jsx`). `POST /api/target/<id>/activate-engine` accetta `path` opzionale e `llama_backend`.
