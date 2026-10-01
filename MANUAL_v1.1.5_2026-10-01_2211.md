@@ -1,6 +1,6 @@
 # MANUALE — ReadyLLM-AMD
 
-Versione: **1.1.4** — 2026-10-01 22:09
+Versione: **1.1.5** — 2026-10-01 22:11
 
 ## 1. Avvio
 Dalla radice del progetto: `python avvia.py` (backend + frontend), `python avvia.py --installa` (installa prima le dipendenze), `python avvia.py --comandi` (stampa i comandi manuali), `--backend` / `--frontend` per avviarne uno solo. Ctrl+C li ferma entrambi. Comandi manuali:
@@ -55,4 +55,4 @@ Il pulsante in basso nella barra laterale ruota English → Italiano → 中文.
      ROCm: `bin-win-hip-radeon-x64`), decomprimerlo e indicare il percorso di `llama-server.exe` in Impostazioni.
 
 ## 9. Errori npm TAR_ENTRY_ERROR su Google Drive
-Causa: Drive per desktop e' un disco virtuale. Soluzioni: (1) spostare il progetto in `C:\dev` (consigliato); (2) `python avvia.py --installa` crea node_modules locale con giunzione; (3) sospendere Drive durante `npm ci`.
+Causa: Drive per desktop e' un disco virtuale. Soluzioni: (1) spostare il progetto in `C:\dev` (consigliato); (2) `python avvia.py --installa` copia il frontend in `%LOCALAPPDATA%\ReadyLLM-AMD\frontend` (robocopy) ed esegue npm/vite da li'; (3) sospendere Drive durante `npm ci`.

@@ -1,6 +1,6 @@
 # CONTEXT — ReadyLLM-AMD
 
-Versione: **1.1.4** — 2026-10-01 22:09
+Versione: **1.1.5** — 2026-10-01 22:11
 
 ## Scopo
 Assistente di deploy/tuning/monitoraggio per LLM locali (llama.cpp, vLLM, SGLang) e generazione video
@@ -55,4 +55,7 @@ Il ramo di lavoro e repository predefinito è `main` (origin: https://github.com
 Aggiunto `avvia.py` nella radice: avvia backend (uvicorn, porta 8000) e frontend (Vite, porta 3000) con un solo comando.
 
 ## Aggiornamento 1.1.4
-`avvia.py --installa` su Google Drive (Windows): node_modules viene creato in `%LOCALAPPDATA%\ReadyLLM-AMD\node_modules` e collegato con giunzione, per evitare gli errori npm TAR_ENTRY_ERROR del disco virtuale. Non verificato su Windows reale.
+`avvia.py --installa` su Google Drive (Windows): (v1.1.4, SOSTITUITO: la giunzione mklink /J fallisce perche' Drive non e' NTFS).
+
+## Aggiornamento 1.1.5
+Su Drive (Windows) `avvia.py` esegue il frontend da una copia locale in `%LOCALAPPDATA%\ReadyLLM-AMD\frontend`, rinnovata a ogni avvio. Non verificato su Windows reale.

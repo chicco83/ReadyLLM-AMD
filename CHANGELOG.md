@@ -1,8 +1,11 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.4** — 2026-10-01 22:09
+Versione corrente: **1.1.5** — 2026-10-01 22:11
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 7. v1.1.5 — 2026-10-01 22:11 — Frontend da copia locale su Drive
+- La giunzione di v1.1.4 falliva ("sono necessari volumi NTFS locali"): `avvia.py` ora copia il frontend con robocopy in `%LOCALAPPDATA%\ReadyLLM-AMD\frontend` ed esegue npm/vite da li'.
 
 ## 6. v1.1.4 — 2026-10-01 22:09 — avvia.py e Google Drive
 - `avvia.py`: rilevamento di cartelle su Google Drive; `--installa` crea node_modules su disco locale (giunzione) per evitare i TAR_ENTRY_ERROR di npm.
