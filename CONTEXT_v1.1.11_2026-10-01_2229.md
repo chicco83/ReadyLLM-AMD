@@ -1,6 +1,6 @@
 # CONTEXT — ReadyLLM-AMD
 
-Versione: **1.1.10** — 2026-10-01 22:24
+Versione: **1.1.11** — 2026-10-01 22:29
 
 ## Scopo
 Assistente di deploy/tuning/monitoraggio per LLM locali (llama.cpp, vLLM, SGLang) e generazione video
@@ -76,3 +76,9 @@ Il tuning intelligente (automatico + AI) e' una sezione della pagina Monitoraggi
 - `installer.detect_llama_backends`: backend del llama-server installato da (1) `ggml-*.dll`/`libggml-*.so` accanto all'eseguibile e (2) `llama-server --list-devices` (dispositivi effettivi, indizio prioritario). Esposto in `/api/target/<id>/engine` come `backend`, `backends`, `devices`.
 - Installazione per backend in cartelle separate (`C:\llama\<backend>` su Windows, `/tmp/llama.cpp-<backend>` su Linux).
 - `POST /api/target/pick`: finestra nativa Tkinter (file/cartella) aperta dal backend; valido solo per target locali. Non verificato su Windows reale.
+
+## Aggiornamento 1.1.11 — Deploy → Tuning, baseline, MTP
+- UI: la pagina Deploy (motori testuali llama.cpp) ha due schede in sequenza «1 · Deploy» e «2 · Tuning»; il tuning e' stato tolto da Monitoraggio (v1.1.9). Modello condiviso via `frontend/src/lib/lastModel.js` (localStorage per target). Elenco modelli del tuning da `/api/deploy/models` (percorsi relativi, anche sottocartelle).
+- Baseline del tuning = parametri del Deploy per il modello (`GET /api/tune/baseline`: ultimo tuning o generatore), modificabile; modalita' deploy / predefiniti motore / nessuna. `POST /api/tune/start` accetta `baseline_args` (stringa); `start_tune`: `None`=nessuna baseline, `{}`=predefiniti motore.
+- MTP: `tuner.mtp_state` = modello (nome file) AND build (`llama-server --help` cita "mtp"). Se non supportato: draft-mtp non proposto nella fase coarse, parametri `spec-*`/`*draft*` tolti dalla baseline e da `/api/deploy/default-args`.
+- Limite noto: `_estimate_vram_gb` usa dimensioni KV tarate su un 27B (8192 x 64 strati): per modelli piu' piccoli e ctx molto alti sovrastima e scarta tutte le combinazioni GPU. Non ancora corretto.

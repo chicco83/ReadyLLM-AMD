@@ -1,6 +1,6 @@
 # MANUALE — ReadyLLM-AMD
 
-Versione: **1.1.10** — 2026-10-01 22:24
+Versione: **1.1.11** — 2026-10-01 22:29
 
 ## 1. Avvio
 Dalla radice del progetto: `python avvia.py` (backend + frontend), `python avvia.py --installa` (installa prima le dipendenze), `python avvia.py --comandi` (stampa i comandi manuali), `--backend` / `--frontend` per avviarne uno solo. Ctrl+C li ferma entrambi. Comandi manuali:
@@ -64,9 +64,14 @@ Se la VRAM e' errata esegui `python avvia.py --diagnosi-gpu` e invia l'output (m
 1. Riavvia SEMPRE il backend dopo un `git pull` (Ctrl+C e `python avvia.py`). 2. Nel log del tuning compaiono ora le righe `[llama-server]` con la causa reale (parametro non supportato, VRAM, DLL mancanti). 3. Il log completo e' in `C:\temp\llama_server.log`.
 
 ## 12. Monitoraggio e tuning in una sola pagina
-La pagina «Monitoraggio e tuning» mostra in alto GPU/CPU/metriche e in basso il tuning (schede Automatico / AI), cosi' si osserva la macchina mentre il tuning gira.
+(v1.1.11: sostituito) Il tuning non e' piu' nella pagina Monitoraggio: vedi sezione 14.
 
 ## 13. Percorsi e backend del motore
 - In Impostazioni, accanto a «Percorso del motore» e «Cartella dei modelli» c'e' il pulsante **Sfoglia…** (solo target locale): apre la finestra standard di Windows.
 - Nel pannello «Motori di inferenza» compare il **backend rilevato** (VULKAN / ROCM / CUDA / CPU) con i dispositivi.
 - Puoi avere piu' installazioni (es. `C:\llama\vulkan` e `C:\llama\rocm`) e scegliere quale usare con «Sfoglia…» sul percorso del motore.
+
+## 14. Deploy e Tuning in sequenza
+- Pagina **Deploy** → scheda **1 · Deploy** (scegli modello, parametri, Avvia) e scheda **2 · Tuning** (stesso modello gia' selezionato).
+- Nel Tuning automatico la **baseline** e' la riga di parametri del Deploy (modificabile); puoi scegliere «Predefiniti del motore» o «Nessuna baseline». Se il modello o la build non supportano MTP, draft-mtp non viene proposto.
+- Il tuning ferma/riavvia llama-server: un modello avviato dal Deploy verra' fermato. «Salva e applica» scrive i parametri migliori nel Deploy.

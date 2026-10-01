@@ -1,8 +1,14 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.10** — 2026-10-01 22:24
+Versione corrente: **1.1.11** — 2026-10-01 22:29
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 13. v1.1.11 — 2026-10-01 22:29 — Deploy→Tuning, baseline dal Deploy, MTP condizionato
+- Pagina Deploy con due schede in sequenza (Deploy, Tuning); tuning tolto da Monitoraggio (etichetta menu ripristinata). Modello condiviso tra le schede.
+- Il tuning usa l'elenco di `/api/deploy/models` (sottocartelle incluse; prima i modelli in sottocartelle non si avviavano).
+- Baseline = parametri del Deploy (modificabile) invece di quella fissa draft-mtp/q4_0/batch4096; opzioni «predefiniti motore» e «nessuna».
+- draft-mtp proposto solo se supportato da modello e build; parametri `spec-*`/`*draft*` rimossi altrimenti (tuning e default del Deploy).
 
 ## 12. v1.1.10 — 2026-10-01 22:24 — Backend del motore e selezione percorsi
 - Rilevamento del backend del llama-server installato (Vulkan/ROCm/CUDA/CPU) con elenco dispositivi, mostrato in Impostazioni.
