@@ -1,8 +1,11 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.6** — 2026-10-01 22:16
+Versione corrente: **1.1.7** — 2026-10-01 22:19
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 9. v1.1.7 — 2026-10-01 22:19 — Versione driver
+- VRAM RX 9070 XT verificata (15.8 GiB). Decodifica della versione driver DirectX (uint64) in formato a.b.c.d.
 
 ## 8. v1.1.6 — 2026-10-01 22:16 — VRAM AMD su Windows
 - `collectors.py`: nuova fonte DirectX (DedicatedVideoMemory, 64 bit) per la VRAM; il valore da `AdapterRAM` (max 4 GB) resta solo come ultimo ripiego.

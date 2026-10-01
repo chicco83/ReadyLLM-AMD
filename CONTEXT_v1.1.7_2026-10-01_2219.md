@@ -1,6 +1,6 @@
 # CONTEXT — ReadyLLM-AMD
 
-Versione: **1.1.6** — 2026-10-01 22:16
+Versione: **1.1.7** — 2026-10-01 22:19
 
 ## Scopo
 Assistente di deploy/tuning/monitoraggio per LLM locali (llama.cpp, vLLM, SGLang) e generazione video
@@ -62,3 +62,6 @@ Su Drive (Windows) `avvia.py` esegue il frontend da una copia locale in `%LOCALA
 
 ## Aggiornamento 1.1.6 — VRAM AMD su Windows
 VRAM rilevata a 4 GB = ripiego su `Win32_VideoController.AdapterRAM` (uint32). Aggiunta la fonte `HKLM\SOFTWARE\Microsoft\DirectX\<guid>\DedicatedVideoMemory` (64 bit) e `avvia.py --diagnosi-gpu`. Non verificato sulla RX 9070 XT reale.
+
+## Aggiornamento 1.1.7
+Verificato sulla RX 9070 XT reale: VRAM 15.8 GiB da `DedicatedVideoMemory` (DirectX). La chiave di classe display non espone qwMemorySize su questo PC. Versione driver DirectX decodificata da uint64 (es. 32.0.31036.15).
