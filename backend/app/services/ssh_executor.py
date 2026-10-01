@@ -1,4 +1,4 @@
-"""SSH 远程命令执行器（复用现有 llama_monitor 逻辑）"""
+"""Esecutore di comandi remoti via SSH (riusa la logica esistente di llama_monitor)"""
 
 import subprocess
 from dataclasses import dataclass
@@ -16,7 +16,7 @@ class SSHResult:
 
 
 def _decode(data: bytes) -> str:
-    """尝试 UTF-8 解码，失败回退 GBK"""
+    """Prova la decodifica UTF-8, in caso di errore ripiega su GBK"""
     if not data:
         return ""
     try:
@@ -31,7 +31,7 @@ def ssh_cmd(
     user: str = "htob",
     timeout: int = 15,
 ) -> SSHResult:
-    """通过 SSH 在远程执行命令"""
+    """Esegue un comando in remoto tramite SSH"""
     full_cmd = [
         "ssh",
         "-o", "ConnectTimeout=5",
@@ -47,6 +47,6 @@ def ssh_cmd(
             returncode=result.returncode,
         )
     except subprocess.TimeoutExpired:
-        return SSHResult(stdout="", stderr="SSH 超时", returncode=-1)
+        return SSHResult(stdout="", stderr="Timeout SSH", returncode=-1)
     except Exception as e:
         return SSHResult(stdout="", stderr=str(e), returncode=-1)

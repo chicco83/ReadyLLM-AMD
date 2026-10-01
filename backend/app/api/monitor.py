@@ -1,4 +1,4 @@
-"""监控 API + WebSocket 推送（基于用户配置的 Target）"""
+"""API di monitoraggio + push via WebSocket (basata sul Target configurato dall'utente)"""
 
 import asyncio
 import json
@@ -16,10 +16,10 @@ router = APIRouter()
 
 @router.get("/snapshot")
 def get_snapshot(target_id: str):
-    """获取一次监控快照"""
+    """Restituisce un'istantanea di monitoraggio"""
     target = get_target(target_id)
     if not target:
-        raise HTTPException(status_code=404, detail="目标机器不存在，请先在设置中配置")
+        raise HTTPException(status_code=404, detail="Macchina target inesistente, configurarla prima nelle Impostazioni")
     executor = make_executor(target)
     try:
         data = collect_all(executor, target)
@@ -31,24 +31,24 @@ def get_snapshot(target_id: str):
 
 @router.get("/token-stats")
 def get_token_stats(target_id: str, days: int = 14):
-    """按天的 token 用量统计（输入/输出），持久化，重启不丢失"""
+    """Statistiche giornaliere di utilizzo token (input/output), persistite, non si perdono al riavvio"""
     return get_daily_stats(target_id, days)
 
 
 @router.get("/token-total")
 def get_token_total(target_id: str):
-    """累计消耗 token（所有已记录天求和）"""
+    """Token consumati cumulati (somma di tutti i giorni registrati)"""
     return get_total_stats(target_id)
 
 
 @router.websocket("/ws")
 async def monitor_websocket(ws: WebSocket, target_id: str = ""):
-    """WebSocket 实时推送监控数据"""
+    """Push in tempo reale dei dati di monitoraggio via WebSocket"""
     await ws.accept()
 
     target = get_target(target_id)
     if not target:
-        await ws.send_text(json.dumps({"error": "目标机器不存在"}))
+        await ws.send_text(json.dumps({"error": "Macchina target inesistente"}))
         await ws.close()
         return
 

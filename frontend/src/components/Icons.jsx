@@ -1,5 +1,5 @@
-// 统一线性 SVG 图标库（lucide 风格，stroke=currentColor 跟随文字色）
-// 用法：<IconActivity size={16} />  默认 18px
+// Libreria unificata di icone SVG lineari (stile lucide, stroke=currentColor segue il colore del testo)
+// Uso: <IconActivity size={16} />  default 18px
 
 function Svg({ size = 18, children, ...rest }) {
   return (
@@ -20,7 +20,7 @@ function Svg({ size = 18, children, ...rest }) {
   )
 }
 
-// ===== 导航 =====
+// ===== Navigazione =====
 export const IconActivity = (p) => (
   <Svg {...p}><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></Svg>
 )
@@ -54,7 +54,7 @@ export const IconSettings = (p) => (
   </Svg>
 )
 
-// ===== 状态 =====
+// ===== Stato =====
 export const IconCheck = (p) => (
   <Svg {...p}><polyline points="20 6 9 17 4 12" /></Svg>
 )
@@ -71,7 +71,7 @@ export const IconStar = (p) => (
   <Svg {...p}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></Svg>
 )
 
-// ===== 操作 =====
+// ===== Azioni =====
 export const IconDownload = (p) => (
   <Svg {...p}><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></Svg>
 )
@@ -88,7 +88,7 @@ export const IconTerminal = (p) => (
   <Svg {...p}><polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" /></Svg>
 )
 
-// ===== 数据 / 装饰 =====
+// ===== Dati / decorazioni =====
 export const IconCpu = (p) => (
   <Svg {...p}>
     <rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" />

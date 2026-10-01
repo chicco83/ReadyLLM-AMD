@@ -1,8 +1,8 @@
-"""llama.cpp 引擎适配器
+"""Adattatore del motore llama.cpp
 
-启动/停止/状态检测均基于用户配置的 Target 执行，按目标 OS 适配。
-Windows 复用已验证的 base64+bat+schtasks 方案（解决中文路径编码与 schtasks 长度限制）。
-Linux 用 nohup 后台启动。
+Avvio/arresto/rilevamento dello stato si basano sul Target configurato dall'utente, adattati al sistema operativo di destinazione.
+Su Windows si riusa la soluzione collaudata base64+bat+schtasks (risolve la codifica dei percorsi cinesi e il limite di lunghezza di schtasks).
+Su Linux si avvia in background con nohup.
 """
 
 import base64
@@ -12,7 +12,7 @@ from .executor import Executor
 from .collectors import path_join
 from ..models.target import Target
 
-# llama-server 默认推荐参数（通用，不含任何特定机器/模型路径）
+# Parametri predefiniti consigliati di llama-server (generici, senza alcuna macchina/percorso di modello specifico)
 DEFAULT_ARGS = [
     "--ctx-size", "8192",
     "--flash-attn", "on",
@@ -42,7 +42,7 @@ class LlamaCppAdapter(EngineAdapter):
 
     def start(self, params: StartParams) -> tuple[bool, str]:
         args = params.extra_args or list(DEFAULT_ARGS)
-        # 注入端口
+        # Inietta la porta
         if "--port" not in " ".join(args):
             args = args + ["--port", str(self.target.service_port)]
         args_str = " ".join(args)
@@ -66,7 +66,7 @@ class LlamaCppAdapter(EngineAdapter):
         )
         result = self.executor.run(write_cmd, timeout=15)
         if not result.ok:
-            return False, f"写入启动脚本失败: {result.stdout} {result.stderr}"
+            return False, f"Scrittura dello script di avvio non riuscita: {result.stdout} {result.stderr}"
 
         run_cmd = (
             'schtasks /create /tn LlamaServer /tr "%s" /sc once /st 00:00 /f '
@@ -74,8 +74,8 @@ class LlamaCppAdapter(EngineAdapter):
         )
         result = self.executor.run(run_cmd, timeout=15)
         if not result.ok:
-            return False, f"启动失败: {result.stdout} {result.stderr}"
-        return True, "启动命令已发送"
+            return False, f"Avvio non riuscito: {result.stdout} {result.stderr}"
+        return True, "Comando di avvio inviato"
 
     def _start_linux(self, exe: str, model_path: str, args_str: str) -> tuple[bool, str]:
         cmd = (
@@ -84,8 +84,8 @@ class LlamaCppAdapter(EngineAdapter):
         )
         result = self.executor.run(cmd, timeout=15)
         if not result.ok:
-            return False, f"启动失败: {result.stdout} {result.stderr}"
-        return True, "启动命令已发送"
+            return False, f"Avvio non riuscito: {result.stdout} {result.stderr}"
+        return True, "Comando di avvio inviato"
 
     def stop(self) -> tuple[bool, str]:
         if self.target.os == "windows":
@@ -93,8 +93,8 @@ class LlamaCppAdapter(EngineAdapter):
         else:
             result = self.executor.run("pkill -f llama-server", timeout=10)
         if result.ok:
-            return True, "服务已停止"
-        return False, f"停止结果: {result.stdout} {result.stderr}"
+            return True, "Servizio fermato"
+        return False, f"Esito dell'arresto: {result.stdout} {result.stderr}"
 
     def is_running(self) -> bool:
         if self.target.os == "windows":
@@ -105,5 +105,5 @@ class LlamaCppAdapter(EngineAdapter):
             return bool(result.stdout)
 
     def get_metrics_url(self) -> str:
-        # metrics 端口仅目标机本地可访问，采集时在目标机 curl 此地址
+        # La porta delle metriche e' accessibile solo localmente sulla macchina target; durante la raccolta si esegue curl su questo indirizzo sulla macchina target
         return f"http://127.0.0.1:{self.target.service_port}/metrics"

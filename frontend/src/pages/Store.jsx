@@ -28,7 +28,7 @@ function ModelCard({ model, targetId, downloadedMap, onDownloaded, source, activ
 
   useEffect(() => () => clearInterval(pollRef.current), [])
 
-  // 页面刷新后恢复活跃下载的轮询
+  // Dopo il refresh della pagina riprende il polling dei download attivi
   useEffect(() => {
     if (activeJob && activeJob.status === 'downloading') {
       setState('downloading')
@@ -63,7 +63,7 @@ function ModelCard({ model, targetId, downloadedMap, onDownloaded, source, activ
     ? Math.min(100, Math.round((fileInfo.size_gb / fileInfo.expected_gb) * 100))
     : 0
 
-  // 魔搭源但模型无魔搭仓库时，实际回退镜像站
+  // Sorgente ModelScope ma il modello non ha repository ModelScope: in realta' si ripiega sul mirror
   const effectiveSource =
     source === 'modelscope' && !(model.available_sources || []).includes('modelscope')
       ? 'hf-mirror'
@@ -87,7 +87,7 @@ function ModelCard({ model, targetId, downloadedMap, onDownloaded, source, activ
       return
     }
     const jobId = d.job_id
-    // 通知父组件注册活跃任务（刷新后可恢复）
+    // Notifica al componente padre di registrare il task attivo (ripristinabile dopo il refresh)
     if (onJobStarted) onJobStarted(model.id, { job_id: jobId, model_id: model.id, status: 'downloading' })
     pollRef.current = setInterval(async () => {
       const pr = await fetch(`/api/store/download/${jobId}`)
@@ -109,7 +109,7 @@ function ModelCard({ model, targetId, downloadedMap, onDownloaded, source, activ
 
   const fits = model.fits === false
 
-  // 右侧状态区域
+  // Area di stato a destra
   function renderStatus() {
     if (state === 'downloading') {
       return (
@@ -208,7 +208,7 @@ export default function Store({ targetId }) {
     if (!targetId) return
     const res = await fetch(`/api/store/downloaded?target_id=${targetId}`)
     const d = await res.json()
-    // 构建 { filename: { size_gb, expected_gb, complete } } map
+    // Costruisce la mappa { filename: { size_gb, expected_gb, complete } }
     const map = {}
     for (const m of (d.models || [])) {
       map[m.filename] = {
@@ -220,7 +220,7 @@ export default function Store({ targetId }) {
     setDownloadedMap(map)
   }
 
-  // 页面加载时恢复活跃下载任务（刷新后不丢失进度）
+  // Al caricamento della pagina ripristina i download attivi (l'avanzamento non si perde dopo il refresh)
   async function loadActiveJobs() {
     if (!targetId) return
     try {
@@ -312,7 +312,7 @@ export default function Store({ targetId }) {
         <div className="text-sm text-gray mb-3 px-3 py-2 bg-card rounded-lg border border-gray/20">{refreshMsg}</div>
       )}
 
-      {/* Tab 切换：精选 / 热门动态 */}
+      {/* Cambio scheda: selezionati / popolari dinamici */}
       <div className="flex items-center gap-2 mb-4">
         <button
           onClick={() => setTab('curated')}
@@ -332,7 +332,7 @@ export default function Store({ targetId }) {
         </button>
       </div>
 
-      {/* 下载源选择器（仅精选模式） */}
+      {/* Selettore della sorgente di download (solo modalita' selezionati) */}
       {tab === 'curated' && (
         <div className="flex items-center gap-2 mb-6 flex-wrap">
           <span className="text-sm text-gray">{t('store.sourceLabel')}</span>

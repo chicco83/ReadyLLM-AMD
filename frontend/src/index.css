@@ -27,7 +27,7 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* 细滚动条 */
+/* Barra di scorrimento sottile */
 * {
   scrollbar-width: thin;
   scrollbar-color: rgba(108, 112, 134, 0.45) transparent;
@@ -55,7 +55,7 @@ body {
   color: #ffffff;
 }
 
-/* 等宽字体用于数值/命令行 */
+/* Carattere a spaziatura fissa per valori numerici/riga di comando */
 .font-mono {
   font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, 'Cascadia Code', Menlo,
     Consolas, monospace;
@@ -63,7 +63,7 @@ body {
   letter-spacing: -0.01em;
 }
 
-/* 卡片玻璃质感 */
+/* Effetto vetro delle schede */
 @layer components {
   .glass {
     background: linear-gradient(180deg, rgba(42, 42, 60, 0.72), rgba(34, 34, 50, 0.66));
@@ -75,7 +75,7 @@ body {
   }
 }
 
-/* 进场动画 */
+/* Animazione di ingresso */
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }

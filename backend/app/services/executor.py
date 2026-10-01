@@ -1,11 +1,11 @@
-"""执行器抽象层
+"""Livello di astrazione degli esecutori
 
-统一本机执行与远程 SSH 执行接口，所有功能基于用户配置的 Target 运行，
-不依赖任何硬编码环境。
+Unifica l'interfaccia di esecuzione locale e remota via SSH; tutte le funzioni operano sul Target configurato dall'utente
+e non dipendono da alcun ambiente cablato nel codice.
 
-除命令行执行 run() 外，另提供 write_file()：通过 scp（远程）或本地文件
-写入大体积内容，绕开 Windows cmd.exe 命令行 8191 字符上限——长 prompt 测速
-必须走此通道，否则 base64 内嵌的命令会被截断。
+Oltre all'esecuzione da riga di comando run(), fornisce write_file(): scrive contenuti voluminosi tramite scp (remoto) o file locale,
+aggirando il limite di 8191 caratteri della riga di comando di Windows cmd.exe: i test di velocita' con prompt lunghi
+devono passare da questo canale, altrimenti il comando con base64 incorporato verrebbe troncato.
 """
 
 import os
@@ -30,7 +30,7 @@ class ExecResult:
 
 
 def _decode(data: bytes) -> str:
-    """尝试 UTF-8 解码，失败回退 GBK（Windows 中文系统常见）"""
+    """Prova la decodifica UTF-8, in caso di errore ripiega su GBK (frequente nei sistemi Windows in cinese)"""
     if not data:
         return ""
     try:
@@ -40,21 +40,21 @@ def _decode(data: bytes) -> str:
 
 
 class Executor:
-    """执行器基类"""
+    """Classe base degli esecutori"""
 
     def run(self, cmd: str, timeout: int = 15) -> ExecResult:
         raise NotImplementedError
 
     def write_file(self, content: str, path: str) -> bool:
-        """把文本内容以 UTF-8 写入目标机的 path（不受命令行长度限制）"""
+        """Scrive il testo in UTF-8 nel path della macchina target (senza il limite di lunghezza della riga di comando)"""
         raise NotImplementedError
 
     def read_file_bytes(self, path: str) -> Optional[bytes]:
-        """读取目标机上 path 的二进制内容（用于把成片等产物拉回控制端）。失败返回 None。"""
+        """Legge il contenuto binario di path sulla macchina target (per riportare al controller prodotti come il video finito). In caso di errore restituisce None."""
         raise NotImplementedError
 
     def write_file_bytes(self, data: bytes, path: str) -> bool:
-        """把二进制内容写入目标机的 path（用于上传首帧图等产物）。成功返回 True。"""
+        """Scrive contenuto binario nel path della macchina target (per caricare prodotti come l'immagine del primo fotogramma). Restituisce True in caso di successo."""
         raise NotImplementedError
 
     def close(self):
@@ -62,7 +62,7 @@ class Executor:
 
 
 class LocalExecutor(Executor):
-    """本机执行器"""
+    """Esecutore locale"""
 
     def run(self, cmd: str, timeout: int = 15) -> ExecResult:
         try:
@@ -75,7 +75,7 @@ class LocalExecutor(Executor):
                 returncode=result.returncode,
             )
         except subprocess.TimeoutExpired:
-            return ExecResult(stdout="", stderr="命令执行超时", returncode=-1)
+            return ExecResult(stdout="", stderr="Timeout di esecuzione del comando", returncode=-1)
         except Exception as e:
             return ExecResult(stdout="", stderr=str(e), returncode=-1)
 
@@ -110,11 +110,11 @@ class LocalExecutor(Executor):
 
 
 class SSHExecutor(Executor):
-    """远程 SSH 执行器（复用系统 OpenSSH 客户端 ssh / scp）
+    """Esecutore SSH remoto (riusa i client ssh / scp di OpenSSH di sistema)
 
-    不使用 paramiko：系统 ssh/scp 能正确读取 ~/.ssh/config、使用默认密钥
-    （id_ed25519 等标准名）、与 Windows OpenSSH 完成算法协商，兼容性更好，
-    也避免 paramiko 在某些环境下连接握手卡住的问题。
+    Non usa paramiko: ssh/scp di sistema leggono correttamente ~/.ssh/config, usano le chiavi predefinite
+    (nomi standard come id_ed25519), negoziano gli algoritmi con OpenSSH di Windows e offrono migliore compatibilita',
+    evitando anche il blocco dell'handshake di paramiko che si verifica in certi ambienti.
     """
 
     def __init__(self, target: Target):
@@ -124,8 +124,8 @@ class SSHExecutor(Executor):
         return f"{self.target.user}@{self.target.host}"
 
     def _common_opts(self) -> list:
-        # BatchMode=yes：需要交互（密码/确认）时立即失败而非永久挂起，
-        # 对后台服务至关重要。
+        # BatchMode=yes: quando serve interazione (password/conferma) fallisce subito invece di restare appeso per sempre,
+        # essenziale per i servizi in background.
         return [
             "-o", "BatchMode=yes",
             "-o", "ConnectTimeout=10",
@@ -134,14 +134,14 @@ class SSHExecutor(Executor):
         ]
 
     def _identity(self) -> list:
-        # 指定了私钥则用之；否则交给系统 ssh 使用默认密钥（~/.ssh/id_ed25519 等）
+        # Se e' indicata una chiave privata la usa; altrimenti lascia a ssh di sistema le chiavi predefinite (~/.ssh/id_ed25519 ecc.)
         if self.target.key_path:
             return ["-i", os.path.expanduser(self.target.key_path)]
         return []
 
     def _wrap_pw(self, base: list) -> list:
-        """密码认证且装有 sshpass 时前置 sshpass；否则原样返回。
-        未装 sshpass 时 BatchMode 会让密码认证快速失败而非挂起。"""
+        """Con autenticazione a password e sshpass installato antepone sshpass; altrimenti restituisce invariato.
+        Senza sshpass, BatchMode fa fallire rapidamente l'autenticazione a password invece di restare appeso."""
         t = self.target
         if t.auth_type == "password" and t.password and shutil.which("sshpass"):
             return ["sshpass", "-p", t.password] + base
@@ -160,12 +160,12 @@ class SSHExecutor(Executor):
                 returncode=result.returncode,
             )
         except subprocess.TimeoutExpired:
-            return ExecResult(stdout="", stderr="SSH 命令执行超时", returncode=-1)
+            return ExecResult(stdout="", stderr="Timeout di esecuzione del comando SSH", returncode=-1)
         except Exception as e:
             return ExecResult(stdout="", stderr=str(e), returncode=-1)
 
     def _scp_argv(self, src: str, dst: str) -> list:
-        # scp 用 -P 指定端口（与 ssh 的 -p 不同）
+        # scp usa -P per indicare la porta (diverso dal -p di ssh)
         base = (["scp"] + self._common_opts() + self._identity()
                 + ["-P", str(self.target.port), src, dst])
         return self._wrap_pw(base)
@@ -174,10 +174,10 @@ class SSHExecutor(Executor):
         return self.write_file_bytes(content.encode("utf-8"), path)
 
     def write_file_bytes(self, data: bytes, path: str) -> bool:
-        """通过 scp 上传，绕开命令行长度限制。
+        """Carica tramite scp, aggirando il limite di lunghezza della riga di comando.
 
-        Windows OpenSSH 的 scp 接受正斜杠路径（如 C:/temp/bench.json），
-        目录需调用方先行创建。"""
+        Lo scp di OpenSSH per Windows accetta percorsi con barre dirette (es. C:/temp/bench.json),
+        la cartella deve essere creata prima dal chiamante."""
         remote = path.replace("\\", "/")
         tmp = None
         try:
@@ -199,9 +199,9 @@ class SSHExecutor(Executor):
                     pass
 
     def read_file_bytes(self, path: str) -> Optional[bytes]:
-        """通过 scp 下载目标机文件（如把成片 mp4 拉回控制端）。
+        """Scarica tramite scp un file della macchina target (es. riportare al controller il video finito mp4).
 
-        Windows OpenSSH 的 scp 接受正斜杠路径，调用方需先把反斜杠转过来。"""
+        Lo scp di OpenSSH per Windows accetta percorsi con barre dirette, il chiamante deve prima convertire le barre rovesciate."""
         remote = path.replace("\\", "/")
         tmp = None
         try:
@@ -225,12 +225,12 @@ class SSHExecutor(Executor):
                     pass
 
     def close(self):
-        # 系统 ssh/scp 每次调用都是独立连接，无需维护长连接
+        # Ogni chiamata di ssh/scp di sistema e' una connessione indipendente, non serve mantenere una connessione persistente
         pass
 
 
 def make_executor(target: Target) -> Executor:
-    """根据 Target 配置创建对应执行器"""
+    """Crea l'esecutore corrispondente in base alla configurazione del Target"""
     if target.conn_type == "ssh":
         return SSHExecutor(target)
     return LocalExecutor()

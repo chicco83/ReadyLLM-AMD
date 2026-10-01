@@ -1,16 +1,16 @@
-"""AI Agent 调优服务
+"""Servizio di tuning con AI Agent
 
-Agent 模式：调用用户配置的大模型 API，让 LLM 基于硬件/模型/场景推理出
-最优参数，并支持多轮迭代（测速结果喂回 → LLM 二次优化 → 再测 → ...）。
+Modalita' Agent: chiama l'API del modello di grandi dimensioni configurata dall'utente e fa dedurre all'LLM, in base a hardware/modello/scenario,
+i parametri ottimali, con supporto a piu' iterazioni (risultati di misura rimandati all'LLM -> seconda ottimizzazione -> nuova misura -> ...).
 
-流程：
-  1. 构造 system prompt（硬件、模型、参数白名单、JSON 格式要求）
-  2. 调 LLM → 解析 action: test(给参数) / done(最终推荐)
-  3. action=test → 启动模型测速 → 结果追加到对话 → 回到 2
-  4. action=done → 输出最终推荐 + 分析
-  5. 达到最大轮次强制结束
+Flusso:
+  1. Costruzione del system prompt (hardware, modello, whitelist dei parametri, requisiti di formato JSON)
+  2. Chiamata all'LLM -> interpretazione di action: test (fornisce parametri) / done (raccomandazione finale)
+  3. action=test -> avvia il modello e misura -> risultato aggiunto alla conversazione -> si torna al punto 2
+  4. action=done -> produce raccomandazione finale + analisi
+  5. Al raggiungimento del numero massimo di round si termina forzatamente
 
-配置持久化到 ~/.model-deploy-assistant/ai_config.json
+La configurazione e' persistita in ~/.model-deploy-assistant/ai_config.json
 """
 
 import json
@@ -28,12 +28,12 @@ from .engine_adapter import StartParams
 from .llama_cpp import LlamaCppAdapter
 from .config_generator import generate_config
 
-# ==================== 配置 ====================
+# ==================== Configurazione ====================
 
 _CONFIG_DIR = os.path.expanduser("~/.model-deploy-assistant")
 _CONFIG_FILE = os.path.join(_CONFIG_DIR, "ai_config.json")
 
-# 参数白名单：LLM 只能推荐这些参数
+# Whitelist dei parametri: l'LLM puo' raccomandare solo questi
 PARAM_WHITELIST = [
     "batch-size", "ubatch-size", "threads", "threads-batch",
     "n-gpu-layers", "gpu-layers", "gpu-layers-draft",
@@ -44,11 +44,11 @@ PARAM_WHITELIST = [
     "override-kv", "load-mode",
 ]
 
-MAX_ROUNDS = 8  # 最大迭代轮次
+MAX_ROUNDS = 8  # numero massimo di round di iterazione
 
 
 def get_config() -> dict:
-    """读取 AI 配置"""
+    """Legge la configurazione AI"""
     if os.path.exists(_CONFIG_FILE):
         try:
             with open(_CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -59,18 +59,18 @@ def get_config() -> dict:
 
 
 def save_config(cfg: dict):
-    """保存 AI 配置"""
+    """Salva la configurazione AI"""
     os.makedirs(_CONFIG_DIR, exist_ok=True)
     with open(_CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 
 def test_connection(cfg: dict) -> dict:
-    """测试 LLM API 连通性，返回 {ok, message, model_info}"""
+    """Verifica la connettivita' dell'API LLM, restituisce {ok, message, model_info}"""
     url = cfg.get("api_url", "").rstrip("/")
     if not url:
-        return {"ok": False, "message": "API 地址为空"}
-    # 尝试 /v1/models 端点
+        return {"ok": False, "message": "Indirizzo API vuoto"}
+    # Prova l'endpoint /v1/models
     models_url = f"{url}/models" if "/v1" in url else f"{url}/v1/models"
     headers = {"Content-Type": "application/json"}
     if cfg.get("api_key"):
@@ -80,149 +80,149 @@ def test_connection(cfg: dict) -> dict:
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode())
             models = [m.get("id", "") for m in data.get("data", [])]
-            return {"ok": True, "message": f"连接成功，可用模型: {', '.join(models[:5])}",
+            return {"ok": True, "message": f"Connessione riuscita, modelli disponibili: {', '.join(models[:5])}",
                     "models": models}
     except urllib.error.HTTPError as e:
-        # 401/403 说明地址对但认证问题；404 可能没有 /models 端点但服务在
+        # 401/403 indica indirizzo corretto ma problema di autenticazione; 404 puo' significare nessun endpoint /models ma servizio presente
         if e.code in (401, 403):
-            return {"ok": False, "message": f"认证失败 (HTTP {e.code})，请检查 API Key"}
-        return {"ok": True, "message": f"服务可达 (HTTP {e.code})，但无法列出模型"}
+            return {"ok": False, "message": f"Autenticazione non riuscita (HTTP {e.code}), controllare la API Key"}
+        return {"ok": True, "message": f"Servizio raggiungibile (HTTP {e.code}), ma impossibile elencare i modelli"}
     except Exception as e:
-        return {"ok": False, "message": f"连接失败: {e}"}
+        return {"ok": False, "message": f"Connessione non riuscita: {e}"}
 
 
-# ==================== Prompt 构造 ====================
+# ==================== Costruzione del prompt ====================
 
 def _build_system_prompt(hardware: dict, model_info: dict, ctx_size: int,
                          goal: str, user_desc: str,
                          baseline_params: dict = None,
                          baseline_metrics: dict = None) -> str:
-    """构造 system prompt。
-    新架构：LLM 的角色是"精调专家"，不是"从零猜参数"。
-    确定性生成器已经给出经过计算验证的基础配置，LLM 在此基础上做小幅探索。
+    """Costruisce il system prompt.
+    Nuova architettura: il ruolo dell'LLM e' quello di «esperto di rifinitura», non di «indovinare i parametri da zero».
+    Il generatore deterministico ha gia' fornito una configurazione di base verificata col calcolo, l'LLM esplora in piccolo a partire da essa.
     """
     hw_lines = []
     gpu = hardware.get("gpu", {})
     cpu = hardware.get("cpu", {})
     mem = hardware.get("memory", {})
     if gpu:
-        hw_lines.append(f"- GPU: {gpu.get('name', '未知')} {gpu.get('total_memory_gb', '?')}GB 显存")
+        hw_lines.append(f"- GPU: {gpu.get('name', 'sconosciuta')} {gpu.get('total_memory_gb', '?')}GB di VRAM")
     if cpu:
-        hw_lines.append(f"- CPU: {cpu.get('name', '未知')} {cpu.get('cores', '?')}核{cpu.get('threads', '?')}线程")
+        hw_lines.append(f"- CPU: {cpu.get('name', 'sconosciuta')} {cpu.get('cores', '?')} core {cpu.get('threads', '?')} thread")
     if mem:
-        hw_lines.append(f"- 内存: {mem.get('total_gb', '?')}GB")
-    hw_lines.append(f"- 系统: {hardware.get('os', '未知')}")
+        hw_lines.append(f"- Memoria: {mem.get('total_gb', '?')}GB")
+    hw_lines.append(f"- Sistema: {hardware.get('os', 'sconosciuto')}")
 
     mi_lines = [
-        f"- 文件: {model_info.get('filename', '未知')}",
-        f"- 大小: {model_info.get('size_gb', '?')}GB",
+        f"- File: {model_info.get('filename', 'sconosciuto')}",
+        f"- Dimensione: {model_info.get('size_gb', '?')}GB",
     ]
 
-    # 基线信息（确定性生成器输出 + 实测结果）
+    # Informazioni di baseline (output del generatore deterministico + risultati misurati)
     baseline_section = ""
     if baseline_params and baseline_metrics:
         baseline_section = f"""
-## 已验证的基线配置（你的起点）
-以下参数由确定性算法生成并已实测验证，是当前已知的最优起点：
+## Configurazione di baseline verificata (il tuo punto di partenza)
+I parametri seguenti sono stati generati da un algoritmo deterministico e verificati con misure reali, sono il miglior punto di partenza noto:
 
-参数: {json.dumps(baseline_params, ensure_ascii=False)}
+Parametri: {json.dumps(baseline_params, ensure_ascii=False)}
 
-实测结果:
-- 解码速度: {baseline_metrics.get('decode', '?')} t/s
-- 预填充速度: {baseline_metrics.get('prefill', '?')} t/s
-- GPU 利用率: {baseline_metrics.get('gpu_util', '?')}%
-- GPU 显存: {baseline_metrics.get('gpu_mem_pct', '?')}%
+Risultati misurati:
+- Velocita' di decodifica: {baseline_metrics.get('decode', '?')} t/s
+- Velocita' di prefill: {baseline_metrics.get('prefill', '?')} t/s
+- Utilizzo GPU: {baseline_metrics.get('gpu_util', '?')}%
+- VRAM GPU: {baseline_metrics.get('gpu_mem_pct', '?')}%
 - CPU: {baseline_metrics.get('cpu_pct', '?')}%
 
-你的任务是在这个基线上做小幅精调，尝试找到更好的配置。
-不要大幅偏离基线（如把 ngl 改成部分卸载、去掉投机解码），这些已经被验证是最优方向。
+Il tuo compito e' fare piccole rifiniture su questa baseline, cercando di trovare una configurazione migliore.
+Non allontanarti molto dalla baseline (ad es. passare ngl a scarico parziale, togliere la decodifica speculativa): queste sono gia' state verificate come direzione ottimale.
 """
 
-    return f"""你是一个 llama.cpp 推理参数精调专家。系统已经通过确定性算法生成了一组经过验证的基础配置，你的任务是在此基础上做小幅探索，寻找可能的性能提升。
+    return f"""Sei un esperto di rifinitura dei parametri di inferenza di llama.cpp. Il sistema ha gia' generato con un algoritmo deterministico una configurazione di base verificata; il tuo compito e' esplorare in piccolo a partire da essa, cercando possibili miglioramenti di prestazioni.
 
-## 硬件环境
+## Ambiente hardware
 {chr(10).join(hw_lines)}
 
-## 模型信息
+## Informazioni sul modello
 {chr(10).join(mi_lines)}
 
-## 用户需求
-- 上下文长度: {ctx_size}
-- 优化目标: {goal}
-- 场景描述: {user_desc or '未提供'}
+## Esigenze dell'utente
+- Lunghezza di contesto: {ctx_size}
+- Obiettivo di ottimizzazione: {goal}
+- Descrizione dello scenario: {user_desc or 'non fornita'}
 {baseline_section}
-## 可用参数白名单
-你只能推荐以下参数（不要发明不存在的参数）：
+## Whitelist dei parametri disponibili
+Puoi raccomandare solo i parametri seguenti (non inventare parametri inesistenti):
 {', '.join(PARAM_WHITELIST)}
 
-## 不可违反的硬约束
-1. n-gpu-layers 必须始终为 "all"。绝对不要尝试部分卸载。
-2. 如果基线已启用投机解码（spec-type=draft-mtp），不要关闭它。投机解码是最大的速度杠杆。
-3. 必须包含 --fit off
-4. flash-attn 的值只能是 "on" 或 "off"
-5. 显存不足时降级顺序：f16 → q8_0 → q4_0（降 cache 量化），绝不减 GPU 层数
-6. ctx-size 由用户固定，禁止在 params 中输出或修改 ctx-size（即使显存不足也不能动它，要降就降 cache 量化）
+## Vincoli rigidi inviolabili
+1. n-gpu-layers deve essere sempre "all". Non tentare mai lo scarico parziale.
+2. Se la baseline ha gia' la decodifica speculativa abilitata (spec-type=draft-mtp), non disattivarla. La decodifica speculativa e' la leva di velocita' piu' grande.
+3. Deve includere --fit off
+4. Il valore di flash-attn puo' essere solo "on" o "off"
+5. Ordine di declassamento quando la VRAM non basta: f16 → q8_0 → q4_0 (si abbassa la quantizzazione della cache), mai ridurre gli strati su GPU
+6. ctx-size e' fissato dall'utente: e' vietato emetterlo o modificarlo in params (anche con VRAM insufficiente non si tocca, se serve si abbassa la quantizzazione della cache)
 
-## 你可以探索的方向（按优先级）
-1. spec-draft-n-max: 尝试 2/3/4/5（影响投机解码接受长度）
-2. batch-size / ubatch-size: 在基线附近 ±50% 范围微调
-3. cache-type-k/v: 如果基线用 f16，可试 q8_0 看是否有速度差异（通常差异 <5%）
-4. threads: 在物理核数附近 ±2 微调
-5. parallel: 如果有并发需求可尝试 2
-6. 如果基线没有启用投机解码（显存不够），不要强行启用
+## Direzioni che puoi esplorare (in ordine di priorita')
+1. spec-draft-n-max: prova 2/3/4/5 (influisce sulla lunghezza di accettazione della decodifica speculativa)
+2. batch-size / ubatch-size: rifinitura nell'intervallo ±50% attorno alla baseline
+3. cache-type-k/v: se la baseline usa f16, prova q8_0 per vedere se c'e' differenza di velocita' (di solito differenza <5%)
+4. threads: rifinitura di ±2 attorno al numero di core fisici
+5. parallel: se c'e' esigenza di concorrenza si puo' provare 2
+6. Se la baseline non ha la decodifica speculativa abilitata (VRAM insufficiente), non forzarla
 
-## 输出格式（严格 JSON）
-每轮你必须输出一个 JSON 对象：
+## Formato di output (JSON rigoroso)
+A ogni round devi emettere un oggetto JSON:
 
-如果要测试一组参数：
-{{"action": "test", "params": {{"参数名": "值", ...}}, "reasoning": "为什么选这组参数的简要分析"}}
+Se vuoi testare un gruppo di parametri:
+{{"action": "test", "params": {{"nome_parametro": "valore", ...}}, "reasoning": "breve analisi del perche' hai scelto questo gruppo di parametri"}}
 
-如果认为已经找到最优或无法继续优化：
-{{"action": "done", "params": {{"参数名": "值", ...}}, "reasoning": "最终推荐的分析说明", "confidence": "high/medium/low"}}
+Se ritieni di aver trovato l'ottimo o di non poter ottimizzare oltre:
+{{"action": "done", "params": {{"nome_parametro": "valore", ...}}, "reasoning": "spiegazione dell'analisi della raccomandazione finale", "confidence": "high/medium/low"}}
 
-注意：
-- params 中的值全部用字符串
-- 不要输出 JSON 以外的内容
-- 每轮只输出一组参数
-- 每次只改 1-2 个参数，不要同时改太多（否则无法判断哪个变化有效）
+Nota:
+- Tutti i valori in params sono stringhe
+- Non emettere nulla al di fuori del JSON
+- A ogni round emetti un solo gruppo di parametri
+- Cambia solo 1-2 parametri alla volta, non troppi insieme (altrimenti non si capisce quale cambiamento sia efficace)
 """
 
 
 def _build_test_result_message(round_num: int, params: dict, metrics: dict) -> str:
-    """构造测速结果反馈消息（含 CPU/内存指标，供 AI 综合分析）"""
+    """Costruisce il messaggio di feedback con i risultati della misura (include metriche CPU/memoria, per un'analisi completa dell'AI)"""
     mem_info = ""
     if metrics.get("mem_total_gb"):
-        mem_info = f"- 系统内存: {metrics.get('mem_used_gb', 0)}GB / {metrics.get('mem_total_gb', 0)}GB ({metrics.get('mem_pct', 0)}%)\n"
-    return f"""第 {round_num} 轮测试结果：
+        mem_info = f"- Memoria di sistema: {metrics.get('mem_used_gb', 0)}GB / {metrics.get('mem_total_gb', 0)}GB ({metrics.get('mem_pct', 0)}%)\n"
+    return f"""Risultati del test del round {round_num}:
 
-测试参数: {json.dumps(params, ensure_ascii=False)}
+Parametri testati: {json.dumps(params, ensure_ascii=False)}
 
-【推理性能】
-- 解码速度: {metrics.get('decode', 0)} t/s
-- 预填充速度: {metrics.get('prefill', 0)} t/s
-- 首字延迟(TTFT): {metrics.get('ttft_ms', 0)} ms
+[Prestazioni di inferenza]
+- Velocita' di decodifica: {metrics.get('decode', 0)} t/s
+- Velocita' di prefill: {metrics.get('prefill', 0)} t/s
+- Latenza al primo token (TTFT): {metrics.get('ttft_ms', 0)} ms
 
-【GPU 状态】
-- GPU 利用率: {metrics.get('gpu_util', 0)}%
-- GPU 显存占用: {metrics.get('gpu_mem_pct', 0)}%
+[Stato GPU]
+- Utilizzo GPU: {metrics.get('gpu_util', 0)}%
+- Occupazione VRAM GPU: {metrics.get('gpu_mem_pct', 0)}%
 
-【CPU 与内存】
-- CPU 利用率: {metrics.get('cpu_pct', 0)}%
+[CPU e memoria]
+- Utilizzo CPU: {metrics.get('cpu_pct', 0)}%
 {mem_info}
-请综合以上所有指标分析：
-- GPU 利用率低但显存占满 → 可能是 memory-bound（正常），不要因此降层数
-- CPU 利用率过高 → 可能 threads 设置不合理或有层落在 CPU
-- 内存占用接近总量 → 有 swap 风险，需降低 ctx 或 cache
-- 如果还有优化空间，输出 action=test 和新的参数组合
-- 如果已经最优或无法继续改善，输出 action=done 和最终推荐
+Analizza tutte le metriche precedenti nel loro insieme:
+- Utilizzo GPU basso ma VRAM piena -> probabilmente memory-bound (normale), non ridurre gli strati per questo
+- Utilizzo CPU troppo alto -> forse threads impostato male o qualche strato e' finito su CPU
+- Occupazione di memoria vicina al totale -> rischio di swap, serve abbassare ctx o cache
+- Se c'e' ancora margine di ottimizzazione, emetti action=test e una nuova combinazione di parametri
+- Se e' gia' ottimale o non si puo' migliorare oltre, emetti action=done e la raccomandazione finale
 """
 
 
-# ==================== LLM 调用 ====================
+# ==================== Chiamata all'LLM ====================
 
 def _call_llm(cfg: dict, messages: List[dict], job_id: str = None) -> Optional[str]:
-    """调用 OpenAI 兼容 API，返回 assistant 消息内容。
-    失败时把真实原因写入 job 日志（之前 except Exception 直接吞掉，无法定位）。
+    """Chiama l'API compatibile OpenAI, restituisce il contenuto del messaggio assistant.
+    In caso di errore scrive la causa reale nel log del job (prima un except Exception la inghiottiva e non si riusciva a individuarla).
     """
     def _log(msg: str):
         if job_id:
@@ -230,20 +230,20 @@ def _call_llm(cfg: dict, messages: List[dict], job_id: str = None) -> Optional[s
 
     url = cfg.get("api_url", "").rstrip("/")
     if not url:
-        _log("  LLM 失败: API 地址为空，请先在 AI 调优设置里填写 api_url")
+        _log("  LLM fallito: indirizzo API vuoto, compilare prima api_url nelle impostazioni di tuning AI")
         return None
     if not url.endswith("/chat/completions"):
         if "/v1" in url:
             url = f"{url}/chat/completions"
         else:
             url = f"{url}/v1/chat/completions"
-    _log(f"  → 请求 LLM: {url} | model={cfg.get('model_name', '')}")
+    _log(f"  → Richiesta all'LLM: {url} | model={cfg.get('model_name', '')}")
 
     headers = {"Content-Type": "application/json"}
     if cfg.get("api_key"):
         headers["Authorization"] = f"Bearer {cfg['api_key']}"
     else:
-        _log("  ⚠ 未配置 API Key（若服务需要鉴权会返回 401）")
+        _log("  ⚠ API Key non configurata (se il servizio richiede autenticazione restituira' 401)")
 
     payload = json.dumps({
         "model": cfg.get("model_name", ""),
@@ -259,36 +259,36 @@ def _call_llm(cfg: dict, messages: List[dict], job_id: str = None) -> Optional[s
             choices = data.get("choices", [])
             if choices:
                 return choices[0].get("message", {}).get("content", "")
-            # 请求成功但无 choices：多半是模型名不对或返回结构异常
-            _log(f"  LLM 返回无 choices，原始响应: {json.dumps(data, ensure_ascii=False)[:400]}")
+            # Richiesta riuscita ma senza choices: di solito il nome del modello e' sbagliato o la struttura della risposta e' anomala
+            _log(f"  L'LLM ha restituito risposta senza choices, risposta grezza: {json.dumps(data, ensure_ascii=False)[:400]}")
     except urllib.error.HTTPError as e:
         body = ""
         try:
             body = e.read().decode(errors="replace")[:400]
         except Exception:
             pass
-        _log(f"  LLM HTTP {e.code} 错误: {body}")
+        _log(f"  Errore HTTP {e.code} dell'LLM: {body}")
     except urllib.error.URLError as e:
-        _log(f"  LLM 网络错误（地址不通/超时/DNS）: {e.reason}")
+        _log(f"  Errore di rete dell'LLM (indirizzo irraggiungibile/timeout/DNS): {e.reason}")
     except Exception as e:
-        _log(f"  LLM 调用异常: {type(e).__name__}: {e}")
+        _log(f"  Eccezione nella chiamata all'LLM: {type(e).__name__}: {e}")
     return None
 
 
 def _parse_llm_response(text: str) -> Optional[dict]:
-    """解析 LLM 返回的 JSON，容错处理"""
+    """Interpreta il JSON restituito dall'LLM, con tolleranza agli errori"""
     if not text:
         return None
-    # 尝试直接解析
+    # Prova l'interpretazione diretta
     text = text.strip()
-    # 去掉可能的 markdown 代码块
+    # Toglie un eventuale blocco di codice markdown
     if text.startswith("```"):
         lines = text.split("\n")
         text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        # 尝试找 JSON 子串
+        # Prova a cercare una sottostringa JSON
         start = text.find("{")
         end = text.rfind("}") + 1
         if start >= 0 and end > start:
@@ -300,28 +300,28 @@ def _parse_llm_response(text: str) -> Optional[dict]:
 
 
 def _validate_params(params: dict) -> dict:
-    """过滤白名单外的参数，返回合法子集；规范化布尔值"""
+    """Filtra i parametri fuori whitelist, restituisce il sottoinsieme valido; normalizza i booleani"""
     valid = {}
     for k, v in params.items():
         if k in PARAM_WHITELIST:
             valid[k] = str(v)
-    # 规范化：flash-attn 只认 on/off，不认 true/false
+    # Normalizzazione: flash-attn riconosce solo on/off, non true/false
     if "flash-attn" in valid:
         fa = valid["flash-attn"].lower()
         if fa in ("true", "1", "yes", "enabled"):
             valid["flash-attn"] = "on"
         elif fa in ("false", "0", "no", "disabled"):
             valid["flash-attn"] = "off"
-    # ctx-size 是用户固定的约束，绝不允许 AI 改动（防御 AI 仍返回它）
+    # ctx-size e' un vincolo fissato dall'utente, all'AI e' assolutamente vietato modificarlo (difesa nel caso l'AI lo restituisca comunque)
     valid.pop("ctx-size", None)
-    # 强制加入必要参数
+    # Aggiunge forzatamente i parametri necessari
     valid["fit"] = "off"
     valid["metrics"] = ""
     valid["host"] = "0.0.0.0"
     return valid
 
 
-# ==================== Agent 任务 ====================
+# ==================== Task dell'Agent ====================
 
 _JOBS: dict = {}
 _LOCK = threading.Lock()
@@ -341,7 +341,7 @@ def get_job(job_id: str) -> Optional[dict]:
 
 
 def list_active_jobs(target_id: str) -> list:
-    """返回该目标机正在运行的 AI 调优任务摘要，供前端刷新后恢复轮询。"""
+    """Restituisce il riepilogo del task di tuning AI in corso sulla macchina target, per riprendere il polling dopo un refresh del frontend."""
     with _LOCK:
         out = []
         for job in _JOBS.values():
@@ -365,18 +365,18 @@ def list_active_jobs(target_id: str) -> list:
 
 def start_ai_tune(target_id: str, model: str, ctx_size: int,
                   goal: str, user_desc: str) -> dict:
-    """启动 AI Agent 调优任务"""
+    """Avvia il task di tuning con AI Agent"""
     target = get_target(target_id)
     if not target:
-        return {"ok": False, "message": "目标机器不存在"}
+        return {"ok": False, "message": "Macchina target inesistente"}
     if not target.engine_path:
-        return {"ok": False, "message": "未配置推理引擎"}
+        return {"ok": False, "message": "Motore di inferenza non configurato"}
     if getattr(target, "engine_type", "llama_cpp") != "llama_cpp":
-        return {"ok": False, "message": "AI 调优目前仅支持 llama.cpp 引擎（vLLM 参数体系不同，暂不支持）"}
+        return {"ok": False, "message": "Il tuning AI per ora supporta solo il motore llama.cpp (il sistema di parametri di vLLM e' diverso, non ancora supportato)"}
 
     cfg = get_config()
     if not cfg.get("api_url"):
-        return {"ok": False, "message": "未配置 AI API，请先在设置中配置"}
+        return {"ok": False, "message": "API AI non configurata, configurarla prima nelle Impostazioni"}
 
     job_id = uuid.uuid4().hex[:8]
     with _LOCK:
@@ -396,40 +396,40 @@ def start_ai_tune(target_id: str, model: str, ctx_size: int,
             engine = LlamaCppAdapter(executor, target)
 
             if not engine.check_installed():
-                _fail(job_id, "目标机未检测到推理引擎")
+                _fail(job_id, "Motore di inferenza non rilevato sulla macchina target")
                 return
 
-            # 采集硬件信息
-            _append_log(job_id, "采集硬件信息...")
+            # Raccolta delle informazioni hardware
+            _append_log(job_id, "Raccolta delle informazioni hardware...")
             hardware = detect_hardware(executor, target)
             hardware["os"] = target.os
 
-            # 模型信息
+            # Informazioni sul modello
             model_path = path_join(target, target.models_dir, model)
             model_size_gb = _get_model_size(executor, target, model_path)
             model_info = {"filename": model, "size_gb": model_size_gb}
 
-            _append_log(job_id, f"硬件: {hardware.get('gpu', {}).get('name', '?')} | "
-                                f"模型: {model} ({model_size_gb}GB) | ctx: {ctx_size}")
+            _append_log(job_id, f"Hardware: {hardware.get('gpu', {}).get('name', '?')} | "
+                                f"modello: {model} ({model_size_gb}GB) | ctx: {ctx_size}")
 
-            # ===== 新架构：确定性生成器出基线 → 实测 → 喂给 LLM =====
+            # ===== Nuova architettura: il generatore deterministico produce la baseline -> misura reale -> alimenta l'LLM =====
             gpu_info = hardware.get("gpu", {})
             cpu_info = hardware.get("cpu", {})
             gpu_vram = gpu_info.get("total_memory_gb", 8)
             cpu_cores = cpu_info.get("cores", 8)
             cpu_threads = cpu_info.get("threads", 16)
 
-            # 基线来源优先级：上次调优结果 > 确定性生成器
+            # Priorita' della sorgente di baseline: ultimo risultato di tuning > generatore deterministico
             from .tune_history import get_latest as _hist_get
             _hist = _hist_get(target_id, model)
             if _hist and _hist.get("params"):
                 baseline_params = dict(_hist["params"])
-                _src = "自动调优" if _hist.get("source") == "tuner" else "AI 调优"
-                _append_log(job_id, f"采用上次调优结果作为基线（{_src}，"
-                                    f"实测 {_hist.get('score', 0)} t/s，{_hist.get('ts', '')}）")
-                _append_log(job_id, f"  参数: {json.dumps(baseline_params, ensure_ascii=False)}")
+                _src = "tuning automatico" if _hist.get("source") == "tuner" else "tuning AI"
+                _append_log(job_id, f"Si usa come baseline l'ultimo risultato di tuning ({_src}, "
+                                    f"misurato {_hist.get('score', 0)} t/s, {_hist.get('ts', '')})")
+                _append_log(job_id, f"  Parametri: {json.dumps(baseline_params, ensure_ascii=False)}")
             else:
-                _append_log(job_id, "生成确定性基础配置...")
+                _append_log(job_id, "Generazione della configurazione di base deterministica...")
                 gen_result = generate_config(
                     gpu_vram_gb=gpu_vram,
                     model_size_gb=model_size_gb,
@@ -444,30 +444,30 @@ def start_ai_tune(target_id: str, model: str, ctx_size: int,
                 for w in gen_result.get("warnings", []):
                     _append_log(job_id, f"  ⚠ {w}")
 
-            # 实测基线配置
-            _append_log(job_id, "实测基线配置...")
+            # Misura reale della configurazione di baseline
+            _append_log(job_id, "Misura reale della configurazione di baseline...")
             valid_baseline = _validate_params(baseline_params)
-            _append_log(job_id, f"  参数: {json.dumps(valid_baseline, ensure_ascii=False)}")
+            _append_log(job_id, f"  Parametri: {json.dumps(valid_baseline, ensure_ascii=False)}")
             baseline_metrics = _run_test(executor, target, engine, model_path,
                                          valid_baseline, ctx_size, job_id)
 
             if baseline_metrics:
-                _append_log(job_id, f"  ✓ 基线实测: 解码 {baseline_metrics.get('decode', 0)} t/s | "
-                                    f"预填充 {baseline_metrics.get('prefill', 0)} t/s | "
+                _append_log(job_id, f"  ✓ Baseline misurata: decodifica {baseline_metrics.get('decode', 0)} t/s | "
+                                    f"prefill {baseline_metrics.get('prefill', 0)} t/s | "
                                     f"GPU {baseline_metrics.get('gpu_util', 0)}%")
             else:
-                _append_log(job_id, "  ⚠ 基线实测失败，AI 将从零开始")
+                _append_log(job_id, "  ⚠ Misura della baseline non riuscita, l'AI partira' da zero")
 
-            # 记录基线为第 0 轮
+            # Registra la baseline come round 0
             with _LOCK:
                 _JOBS[job_id]["rounds"].append({
                     "round": 0,
                     "params": valid_baseline,
                     "metrics": baseline_metrics,
-                    "reasoning": "确定性生成器输出（非 AI）",
+                    "reasoning": "Output del generatore deterministico (non AI)",
                 })
 
-            # 构造 LLM 对话（含基线信息）
+            # Costruisce la conversazione con l'LLM (incluse le informazioni di baseline)
             system_prompt = _build_system_prompt(
                 hardware, model_info, ctx_size, goal, user_desc,
                 baseline_params=valid_baseline,
@@ -475,7 +475,7 @@ def start_ai_tune(target_id: str, model: str, ctx_size: int,
             )
             messages = [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "基线已实测完毕，请在此基础上探索可能的性能提升。每次只改 1-2 个参数。"},
+                {"role": "user", "content": "La baseline e' stata misurata, esplora a partire da essa possibili miglioramenti di prestazioni. Cambia solo 1-2 parametri alla volta."},
             ]
 
             best_result = None
@@ -484,30 +484,30 @@ def start_ai_tune(target_id: str, model: str, ctx_size: int,
                 best_result = {"params": valid_baseline, "metrics": baseline_metrics, "round": 0}
 
             for round_num in range(1, MAX_ROUNDS + 1):
-                _append_log(job_id, f"【第 {round_num}/{MAX_ROUNDS} 轮】调用 AI 分析...")
+                _append_log(job_id, f"[Round {round_num}/{MAX_ROUNDS}] chiamata all'AI per l'analisi...")
 
-                # 调 LLM
+                # Chiama l'LLM
                 response = _call_llm(cfg, messages, job_id)
                 if response is None:
-                    _fail(job_id, f"第 {round_num} 轮 LLM 调用失败（原因见上方日志）")
+                    _fail(job_id, f"Chiamata all'LLM non riuscita al round {round_num} (causa nei log sopra)")
                     return
 
                 parsed = _parse_llm_response(response)
                 if parsed is None:
-                    _append_log(job_id, f"  ⚠ AI 返回无法解析，原始内容: {response[:200]}")
-                    # 把错误反馈给 LLM 重试
+                    _append_log(job_id, f"  ⚠ Risposta dell'AI non interpretabile, contenuto grezzo: {response[:200]}")
+                    # Rimanda l'errore all'LLM perche' riprovi
                     messages.append({"role": "assistant", "content": response})
-                    messages.append({"role": "user", "content": "你的输出不是合法 JSON，请严格按格式重新输出。"})
+                    messages.append({"role": "user", "content": "Il tuo output non e' JSON valido, riemettilo rispettando rigorosamente il formato."})
                     continue
 
                 action = parsed.get("action", "")
                 reasoning = parsed.get("reasoning", "")
                 params = parsed.get("params", {})
 
-                _append_log(job_id, f"  AI 分析: {reasoning[:150]}")
+                _append_log(job_id, f"  Analisi dell'AI: {reasoning[:150]}")
 
                 if action == "done":
-                    _append_log(job_id, f"  ✓ AI 认为已找到最优 (置信度: {parsed.get('confidence', '?')})")
+                    _append_log(job_id, f"  ✓ L'AI ritiene di aver trovato l'ottimo (confidenza: {parsed.get('confidence', '?')})")
                     final_params = _validate_params(params)
                     with _LOCK:
                         job = _JOBS[job_id]
@@ -519,47 +519,47 @@ def start_ai_tune(target_id: str, model: str, ctx_size: int,
                         }
                         job["status"] = "success"
                         _tid, _model, _ctx = job["target_id"], job["model"], job["ctx_size"]
-                    _append_log(job_id, f"✓ AI 调优完成，推荐参数: {json.dumps(final_params, ensure_ascii=False)}")
-                    # 落盘最近调优参数，供部署页作为默认参数回填
+                    _append_log(job_id, f"✓ Tuning AI completato, parametri consigliati: {json.dumps(final_params, ensure_ascii=False)}")
+                    # Salva su disco gli ultimi parametri di tuning, per riempire i default della pagina Deploy
                     try:
                         from .tune_history import save_latest
                         save_latest(_tid, _model, _ctx, final_params,
                                     source="ai_tuner", score=best_score)
                     except Exception as e:
-                        _append_log(job_id, f"  ⚠ 调优结果落盘失败: {e}")
+                        _append_log(job_id, f"  ⚠ Salvataggio su disco del risultato di tuning non riuscito: {e}")
                     return
 
                 if action != "test":
-                    _append_log(job_id, f"  ⚠ 未知 action: {action}，要求 AI 重试")
+                    _append_log(job_id, f"  ⚠ action sconosciuta: {action}, si chiede all'AI di riprovare")
                     messages.append({"role": "assistant", "content": response})
-                    messages.append({"role": "user", "content": "action 必须是 test 或 done，请重新输出。"})
+                    messages.append({"role": "user", "content": "action deve essere test o done, riemetti l'output."})
                     continue
 
-                # 执行测试
+                # Esegue il test
                 valid_params = _validate_params(params)
-                _append_log(job_id, f"  测试参数: {json.dumps(valid_params, ensure_ascii=False)}")
+                _append_log(job_id, f"  Parametri di test: {json.dumps(valid_params, ensure_ascii=False)}")
 
                 metrics = _run_test(executor, target, engine, model_path,
                                     valid_params, ctx_size, job_id)
 
                 if metrics is None:
-                    _append_log(job_id, "  ✗ 测试失败（启动超时或异常）")
-                    test_msg = f"第 {round_num} 轮测试失败：模型启动超时或参数无效。请换一组参数重试。"
+                    _append_log(job_id, "  ✗ Test non riuscito (timeout di avvio o eccezione)")
+                    test_msg = f"Test del round {round_num} non riuscito: timeout di avvio del modello o parametri non validi. Riprova con un altro gruppo di parametri."
                 else:
                     score = metrics.get("decode", 0)
-                    _append_log(job_id, f"  结果: 解码 {metrics['decode']} t/s | "
-                                        f"预填充 {metrics['prefill']} t/s | "
-                                        f"GPU {metrics['gpu_util']}% | 显存 {metrics['gpu_mem_pct']}% | "
+                    _append_log(job_id, f"  Risultato: decodifica {metrics['decode']} t/s | "
+                                        f"prefill {metrics['prefill']} t/s | "
+                                        f"GPU {metrics['gpu_util']}% | VRAM {metrics['gpu_mem_pct']}% | "
                                         f"CPU {metrics.get('cpu_pct', 0)}% | "
-                                        f"内存 {metrics.get('mem_used_gb', 0)}/{metrics.get('mem_total_gb', 0)}GB")
+                                        f"memoria {metrics.get('mem_used_gb', 0)}/{metrics.get('mem_total_gb', 0)}GB")
                     test_msg = _build_test_result_message(round_num, valid_params, metrics)
 
-                    # 记录最佳
+                    # Registra il migliore
                     if score > best_score:
                         best_score = score
                         best_result = {"params": valid_params, "metrics": metrics, "round": round_num}
 
-                # 记录本轮
+                # Registra questo round
                 with _LOCK:
                     _JOBS[job_id]["rounds"].append({
                         "round": round_num,
@@ -568,28 +568,28 @@ def start_ai_tune(target_id: str, model: str, ctx_size: int,
                         "reasoning": reasoning,
                     })
 
-                # 喂回结果
+                # Rimanda i risultati
                 messages.append({"role": "assistant", "content": response})
                 messages.append({"role": "user", "content": test_msg})
 
-            # 达到最大轮次
-            _append_log(job_id, f"达到最大轮次 {MAX_ROUNDS}，使用历史最佳结果")
+            # Raggiunto il numero massimo di round
+            _append_log(job_id, f"Raggiunto il numero massimo di round {MAX_ROUNDS}, si usa il miglior risultato storico")
             if best_result:
                 with _LOCK:
                     job = _JOBS[job_id]
                     job["best"] = {
                         "params": best_result["params"],
-                        "reasoning": f"达到最大轮次，取历史最佳（第 {best_result['round']} 轮）",
+                        "reasoning": f"Raggiunto il numero massimo di round, si prende il migliore storico (round {best_result['round']})",
                         "confidence": "medium",
                         "round": best_result["round"],
                     }
                     job["status"] = "success"
             else:
-                _fail(job_id, "所有轮次均失败")
+                _fail(job_id, "Tutti i round sono falliti")
 
         except Exception as e:
             _fail(job_id, str(e))
-            _append_log(job_id, f"✗ 异常: {e}")
+            _append_log(job_id, f"✗ Eccezione: {e}")
         finally:
             try:
                 if executor:
@@ -605,13 +605,13 @@ def start_ai_tune(target_id: str, model: str, ctx_size: int,
 
 def _run_test(executor: Executor, target: Target, engine: LlamaCppAdapter,
               model_path: str, params: dict, ctx_size: int, job_id: str) -> Optional[dict]:
-    """启动模型 → 测速 → 停止，返回 metrics 或 None"""
+    """Avvia il modello -> misura -> arresto, restituisce metrics o None"""
     from .tuner import _wait_ready, _bench_median
 
     engine.stop()
     time.sleep(2)
 
-    # 构造参数列表（ctx-size/port/metrics/host 由下面统一追加，避免重复）
+    # Costruisce l'elenco dei parametri (ctx-size/port/metrics/host vengono aggiunti in modo uniforme sotto, per evitare duplicati)
     args = []
     for k, v in params.items():
         if k in ("metrics", "host", "ctx-size", "port"):
@@ -629,11 +629,11 @@ def _run_test(executor: Executor, target: Target, engine: LlamaCppAdapter,
 
     ok, msg = engine.start(StartParams(model_path=model_path, extra_args=args))
     if not ok:
-        _append_log(job_id, f"  启动失败: {msg}")
+        _append_log(job_id, f"  Avvio non riuscito: {msg}")
         return None
 
     if not _wait_ready(executor, target):
-        _append_log(job_id, "  启动超时")
+        _append_log(job_id, "  Timeout di avvio")
         engine.stop()
         return None
 
@@ -644,7 +644,7 @@ def _run_test(executor: Executor, target: Target, engine: LlamaCppAdapter,
 
 
 def _get_model_size(executor: Executor, target: Target, model_path: str) -> float:
-    """探测模型文件大小 GB"""
+    """Rileva la dimensione del file del modello in GB"""
     if target.os == "windows":
         cmd = (f'powershell -Command "if(Test-Path \'{model_path}\')'
                f'{{(Get-Item \'{model_path}\').Length}}else{{0}}"')

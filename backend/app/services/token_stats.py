@@ -1,10 +1,10 @@
-"""Token 用量统计：按天累加 prompt/completion token，持久化，后端重启不丢失。
+"""Statistiche d'uso dei token: accumula per giorno i token prompt/completion, persistite, non si perdono al riavvio del backend.
 
-源数据 prompt_tokens / completion_tokens 是推理引擎"启动以来累计值"，
-模型重启会归零。这里做增量累加：
-  - 正常：delta = current - last
-  - 归零（模型重启）：current < last，delta = current（从 0 重新累计的部分）
-按天分桶落盘到 ~/.model-deploy-assistant/token_stats.json，后端重启不丢失。
+I dati sorgente prompt_tokens / completion_tokens sono i "valori cumulati dall'avvio" del motore di inferenza,
+e si azzerano al riavvio del modello. Qui si fa un'accumulazione incrementale:
+  - Normale: delta = current - last
+  - Azzeramento (riavvio del modello): current < last, delta = current (la parte ricominciata da 0)
+Suddivisi per giorno e salvati in ~/.model-deploy-assistant/token_stats.json, non si perdono al riavvio del backend.
 """
 
 import json
@@ -38,17 +38,17 @@ def _save(data: dict) -> None:
 
 
 def _prune_days(days: dict) -> None:
-    """只保留最近 RETENTION_DAYS 天，避免文件无限增长。"""
+    """Conserva solo gli ultimi RETENTION_DAYS giorni, per evitare che il file cresca all'infinito."""
     cutoff = (date.today() - timedelta(days=RETENTION_DAYS)).isoformat()
     for k in [k for k in days if k < cutoff]:
         del days[k]
 
 
 def record_tokens(target_id: str, metrics: dict) -> None:
-    """每次采集后调用，把增量累加进当天桶。
+    """Chiamata dopo ogni raccolta, accumula l'incremento nel bucket del giorno corrente.
 
-    无 token 字段（如 comfyui 引擎）则跳过。重复调用且值未变化时 delta=0，
-    不会重复累加，因此 snapshot 与 ws 通道都可安全调用。
+    Se non ci sono campi token (es. motore comfyui) salta. Chiamate ripetute a valori invariati danno delta=0,
+    senza doppia accumulazione, quindi sia il canale snapshot sia quello ws possono chiamarla in sicurezza.
     """
     if not metrics or ("prompt_tokens" not in metrics and "completion_tokens" not in metrics):
         return
@@ -60,7 +60,7 @@ def record_tokens(target_id: str, metrics: dict) -> None:
         st = data.setdefault(target_id, {"last_prompt": 0, "last_completion": 0, "days": {}})
         last_p = st.get("last_prompt", 0)
         last_c = st.get("last_completion", 0)
-        # 归零检测：current < last 说明模型重启，增量取 current（从 0 重新累计的部分）
+        # Rilevamento dell'azzeramento: current < last indica un riavvio del modello, l'incremento e' current (la parte ricominciata da 0)
         delta_p = cur_p - last_p if cur_p >= last_p else cur_p
         delta_c = cur_c - last_c if cur_c >= last_c else cur_c
         if delta_p < 0:
@@ -81,7 +81,7 @@ def record_tokens(target_id: str, metrics: dict) -> None:
 
 
 def get_total_stats(target_id: str) -> dict:
-    """累计消耗：所有已记录天的 prompt/completion 求和（不受查询窗口限制）。"""
+    """Consumo cumulato: somma prompt/completion di tutti i giorni registrati (non limitato dalla finestra di interrogazione)."""
     with _lock:
         data = _load()
     day_map = data.get(target_id, {}).get("days", {})
@@ -91,9 +91,9 @@ def get_total_stats(target_id: str) -> dict:
 
 
 def get_daily_stats(target_id: str, days: int = 14) -> list:
-    """返回 [{date, prompt, completion}]，缺失天补 0。
+    """Restituisce [{date, prompt, completion}], con 0 per i giorni mancanti.
 
-    窗口起点：最早有数据的那天（含今天）；尚无任何数据时回退最近 days 天。
+    Inizio della finestra: il primo giorno con dati (incluso oggi); se non ci sono ancora dati, ripiega sugli ultimi days giorni.
     """
     with _lock:
         data = _load()

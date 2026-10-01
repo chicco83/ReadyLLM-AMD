@@ -1,24 +1,24 @@
-"""端到端验证核心：LLM 自动编排 → 拼装器输出，校验是否合格官方六段式。
-不依赖 ComfyUI，直接调 enhance_prompt(mode=r2v)，检查返回的 final_prompt。"""
+"""Verifica end-to-end del nucleo: orchestrazione automatica dell'LLM -> output dell'assemblatore, controlla se e' una struttura ufficiale in sei sezioni valida.
+Non dipende da ComfyUI, chiama direttamente enhance_prompt(mode=r2v) e controlla il final_prompt restituito."""
 import sys
 sys.path.insert(0, ".")
 from app.services.video_prompt import enhance_prompt
 
-PROMPT = ("古风汉服少女在江南风格的小河边蹲着洗衣服，清晨薄雾，"
-          "镜头缓缓推近，氛围安静唯美")
+PROMPT = ("Una ragazza in abito hanfu di stile antico accovacciata a lavare i panni lungo un ruscello in stile Jiangnan, nebbiolina del primo mattino, "
+          "la camera si avvicina lentamente, atmosfera quieta e poetica")
 
 r = enhance_prompt(PROMPT, mode="r2v", picture_count=2)
 if not r:
-    print("FAIL: enhance_prompt 返回 None（LLM 未配置/调用失败/解析失败）")
+    print("FAIL: enhance_prompt ha restituito None (LLM non configurato / chiamata fallita / interpretazione fallita)")
     sys.exit(1)
 
 fp = r["prompt"]
-print("===== 自动拼装的 final_prompt =====")
+print("===== final_prompt assemblato automaticamente =====")
 print(fp)
 print("\n===== steps=%s cfg=%s =====" % (r["steps"], r["cfg"]))
 print("reasoning:", r["reasoning"])
 
-# 格式校验：六段式必备字段
+# Controllo del formato: campi obbligatori delle sei sezioni
 checks = {
     "subject_definitions:": "subject_definitions:" in fp,
     "summary:": "summary:" in fp,
@@ -30,12 +30,12 @@ checks = {
     "fully_preserved": "fully_preserved" in fp,
     "<Subject": "<Subject" in fp,
     "<Picture": "<Picture" in fp,
-    "运镜三维度(amplitude/speed)": ("amplitude" in fp or "speed" in fp
+    "Movimento di camera a tre dimensioni (amplitude/speed)": ("amplitude" in fp or "speed" in fp
                               or "Static Shot" in fp),
 }
-print("\n===== 格式校验 =====")
+print("\n===== Controllo del formato =====")
 allok = True
 for k, v in checks.items():
-    print("  [%s] %s" % ("OK" if v else "缺失", k))
+    print("  [%s] %s" % ("OK" if v else "mancante", k))
     allok = allok and v
-print("\n结论:", "✅ 合格官方六段式" if allok else "⚠️ 有字段缺失，见上")
+print("\nConclusione:", "✅ Sei sezioni ufficiali valide" if allok else "⚠️ Mancano dei campi, vedi sopra")

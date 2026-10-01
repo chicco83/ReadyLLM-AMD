@@ -1,8 +1,8 @@
-"""配置（通用项，不含任何特定机器/路径硬编码）"""
+"""Configurazione (voci generiche, senza alcuna macchina/percorso cablato nel codice)"""
 
-# 监控刷新间隔（毫秒）
+# Intervallo di aggiornamento del monitoraggio (millisecondi)
 REFRESH_INTERVAL = 10000
 
-# 服务监听
+# Ascolto del servizio
 HOST = "127.0.0.1"
 PORT = 8000

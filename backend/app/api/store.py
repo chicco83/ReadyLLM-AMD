@@ -1,7 +1,7 @@
-"""模型商店 API
+"""API del negozio di modelli
 
-提供内置模型目录浏览、按目标机显存筛选、启动下载、进度查询、
-已下载模型列表。下载在目标机执行，支持断点续传。
+Fornisce la navigazione del catalogo di modelli integrato, il filtro per VRAM della macchina target, l'avvio dei download, l'interrogazione dell'avanzamento
+e l'elenco dei modelli scaricati. Il download viene eseguito sulla macchina target e supporta la ripresa.
 """
 
 from fastapi import APIRouter
@@ -18,7 +18,7 @@ router = APIRouter()
 
 @router.get("/jobs")
 def active_jobs(target_id: Optional[str] = None):
-    """列出所有下载任务（含进行中的），前端刷新后据此恢复进度"""
+    """Elenca tutti i task di download (anche in corso); il frontend li usa per ripristinare l'avanzamento dopo un refresh"""
     jobs = downloader.list_jobs()
     if target_id:
         jobs = [j for j in jobs if j["target_id"] == target_id]
@@ -28,8 +28,8 @@ def active_jobs(target_id: Optional[str] = None):
 @router.get("/models")
 def models(target_id: Optional[str] = None, source: str = "hf-mirror",
            category: Optional[str] = None):
-    """模型列表；category=text/video 按类别筛选；给定 target_id 时按该机显存
-    标注是否可跑，source 选择下载源"""
+    """Elenco dei modelli; category=text/video filtra per categoria; dato target_id indica in base alla VRAM
+    di quella macchina se il modello puo' girare, source sceglie la sorgente di download"""
     items = list_all(source, category)
     if target_id:
         target = get_target(target_id)
@@ -41,7 +41,7 @@ def models(target_id: Optional[str] = None, source: str = "hf-mirror",
                 gpu = _detect_gpu_static(executor, target)
                 if gpu:
                     vram = gpu.get("total_memory_gb", 0)
-                    # Apple Silicon 统一内存：可用显存≈物理内存的 75%（Metal 默认上限）
+                    # Memoria unificata Apple Silicon: VRAM utilizzabile ~ 75% della memoria fisica (limite predefinito di Metal)
                     if gpu.get("unified") or vram == 0:
                         mem = _detect_memory_static(executor, target)
                         vram = mem.get("total_gb", 0) * 0.75
@@ -54,14 +54,14 @@ def models(target_id: Optional[str] = None, source: str = "hf-mirror",
 
 @router.get("/refresh")
 def refresh_catalog():
-    """手动刷新：从 HuggingFace 动态获取最新热门 GGUF 模型"""
+    """Aggiornamento manuale: ottiene da HuggingFace i modelli GGUF popolari piu' recenti"""
     result = fetch_dynamic_catalog(force=True)
     return result
 
 
 @router.get("/dynamic")
 def dynamic_models():
-    """获取动态模型列表（有缓存则用缓存）"""
+    """Ottiene l'elenco dinamico dei modelli (usa la cache se presente)"""
     result = fetch_dynamic_catalog(force=False)
     return result
 
@@ -74,13 +74,13 @@ class DownloadRequest(BaseModel):
 
 @router.post("/download")
 def download(req: DownloadRequest):
-    """启动下载任务（source 选择下载源，魔搭无对应仓库自动回退镜像站）"""
+    """Avvia il task di download (source sceglie la sorgente; se ModelScope non ha il repository corrispondente si ripiega automaticamente sul mirror)"""
     return downloader.start_download(req.target_id, req.model_id, req.source)
 
 
 @router.get("/download/{job_id}")
 def download_status(job_id: str):
-    """查询下载进度（实时读取目标机已落盘字节）"""
+    """Interroga l'avanzamento del download (legge in tempo reale i byte gia' scritti su disco dalla macchina target)"""
     job = downloader.query_progress(job_id)
     if not job:
         return {"status": "not_found", "logs": []}
@@ -92,20 +92,23 @@ def download_status(job_id: str):
 
 @router.get("/downloaded")
 def downloaded(target_id: str):
-    """列出目标机模型目录下的 .gguf 文件（含实际大小），前端据此判断完整性"""
+    """Elenca i file .gguf nella cartella dei modelli della macchina target (con la dimensione reale); il frontend li usa per verificarne l'integrita'"""
     target = get_target(target_id)
     if not target or not target.models_dir:
-        return {"models": [], "error": "未配置模型目录" if not (target and target.models_dir) else "目标机器不存在"}
+        return {"models": [], "error": "Cartella dei modelli non configurata" if not (target and target.models_dir) else "Macchina target inesistente"}
     executor = make_executor(target)
     try:
         if target.os == "windows":
-            # 输出 "文件名|字节数" 格式
-            cmd = (f'powershell -Command "Get-ChildItem \'{target.models_dir}\\*.gguf\' '
+            # Formato di output "nomefile|byte"
+            # [2026-10-01 v1.1.0] -Recurse: cerca anche nelle sottocartelle.
+            # Versione precedente (sostituita): Get-ChildItem '<dir>\\*.gguf' (solo primo livello)
+            cmd = (f'powershell -Command "Get-ChildItem \'{target.models_dir}\' -Recurse -Filter *.gguf '
                    f'| ForEach-Object {{ $_.Name + \'|\' + $_.Length }}"')
             result = executor.run(cmd, timeout=15)
         else:
             result = executor.run(
-                f'find "{target.models_dir}" -maxdepth 1 -name "*.gguf" -printf "%f|%s\\n" 2>/dev/null '
+                # [2026-10-01 v1.1.0] Ricorsivo (era: find ... -maxdepth 1 -name "*.gguf")
+                f'find -L "{target.models_dir}" -maxdepth 8 -iname "*.gguf" -printf "%f|%s\\n" 2>/dev/null '
                 f'|| stat -f "%N|%z" "{target.models_dir}"/*.gguf 2>/dev/null',
                 timeout=15)
         files = []
@@ -125,14 +128,14 @@ def downloaded(target_id: str):
                     fname = line.split("\\")[-1].split("/")[-1]
                     size_bytes = 0
                 files.append((fname, size_bytes))
-        # 与目录匹配，标注完整性
+        # Confronto con il catalogo, indicazione dell'integrita'
         catalog_names = {m["filename"]: m for m in list_all()}
         models = []
         for fname, size_bytes in files:
             entry = catalog_names.get(fname)
             expected_gb = entry["size_gb"] if entry else None
             size_gb = round(size_bytes / (1024 ** 3), 2)
-            # 判断是否完整：有目录预期大小时，实际 >= 预期的 90% 视为完整
+            # Valutazione di integrita': se il catalogo indica una dimensione attesa, una dimensione reale >= 90% di quella attesa vale come completo
             complete = True
             if expected_gb and expected_gb > 0:
                 complete = size_gb >= expected_gb * 0.9

@@ -1,11 +1,11 @@
-"""推理引擎注册表 / 工厂
+"""Registro / factory dei motori di inferenza
 
-集中管理所有可用引擎的元信息与适配器实例化。调用方（deploy / installer /
-前端配置页）只需按 target.engine_type 取适配器或元信息，不再硬编码具体类。
+Gestisce in modo centralizzato i metadati di tutti i motori disponibili e l'istanziazione degli adattatori. Il chiamante (deploy / installer /
+pagina di configurazione del frontend) deve solo ottenere adattatore o metadati in base a target.engine_type, senza piu' classi concrete cablate.
 
-新增引擎步骤：
-  1. 实现一个 EngineAdapter 子类（如 vllm.VLLMAdapter）
-  2. 在下方 _ADAPTERS 与 ENGINE_META 各加一条
+Passi per aggiungere un motore:
+  1. Implementare una sottoclasse di EngineAdapter (es. vllm.VLLMAdapter)
+  2. Aggiungere una voce in _ADAPTERS e una in ENGINE_META qui sotto
 """
 
 from typing import Optional
@@ -17,7 +17,7 @@ from .sglang import SGLangAdapter
 from .comfyui import ComfyUIAdapter
 from ..models.target import Target
 
-# engine_type -> 适配器类
+# engine_type -> classe dell'adattatore
 _ADAPTERS = {
     "llama_cpp": LlamaCppAdapter,
     "vllm": VLLMAdapter,
@@ -25,66 +25,66 @@ _ADAPTERS = {
     "comfyui": ComfyUIAdapter,
 }
 
-# engine_type -> 展示与能力元信息（前端配置页/部署页消费）
-# 注意：desc / install_hint / note / windows_note 这类面向用户的文案，前端已改为按界面语言
-# 从 frontend/src/i18n/translations.js 的 engine.<type>.<field> 键取值（见 Settings.jsx 的 engineText），
-# 此处保留同一份中文作为 API 默认值与降级兜底——改文案时请同步前端 i18n，否则界面上看不到变化。
+# engine_type -> metadati di visualizzazione e capacita' (usati dalle pagine di configurazione/deploy del frontend)
+# Nota: i testi rivolti all'utente come desc / install_hint / note / windows_note sono ora presi dal frontend nella lingua dell'interfaccia
+# tramite le chiavi engine.<type>.<field> di frontend/src/i18n/translations.js (vedi engineText in Settings.jsx);
+# qui si conserva lo stesso testo come valore predefinito dell'API e ripiego: se si cambia un testo, aggiornare anche l'i18n del frontend, altrimenti nell'interfaccia non si vede la modifica.
 ENGINE_META = {
     "llama_cpp": {
         "label": "llama.cpp",
-        "desc": "原生跨平台，支持 GGUF 量化模型，CPU/GPU 混合推理，普通用户首选",
+        "desc": "Nativo multipiattaforma, supporta modelli quantizzati GGUF, inferenza ibrida CPU/GPU, prima scelta per l'utente comune",
         "supported_os": ["windows", "linux", "macos"],
         "model_format": "gguf",
-        "install_hint": "一键安装官方预编译包 / brew / 源码编译",
+        "install_hint": "Installazione con un clic del pacchetto precompilato ufficiale / brew / compilazione dai sorgenti",
         "default_cmd": "llama-server",
     },
     "vllm": {
         "label": "vLLM",
-        "desc": "高吞吐推理引擎，需 NVIDIA GPU + CUDA，使用 HuggingFace safetensors 权重",
+        "desc": "Motore di inferenza ad alto throughput, richiede GPU NVIDIA + CUDA, usa pesi HuggingFace safetensors",
         "supported_os": ["linux", "macos"],
         "model_format": "safetensors",
-        "install_hint": "pip install vllm（需 Python 3.9+ 与 CUDA 环境）",
+        "install_hint": "pip install vllm (richiede Python 3.9+ e ambiente CUDA)",
         "default_cmd": "vllm",
-        # vLLM 不支持 Windows 原生，前端据此提示走 WSL2
-        "windows_note": "vLLM 不支持 Windows 原生运行，请在 WSL2 (Linux) 中部署，或改用 llama.cpp",
+        # vLLM non supporta Windows in modo nativo, il frontend lo usa per suggerire WSL2
+        "windows_note": "vLLM non supporta l'esecuzione nativa su Windows: distribuirlo in WSL2 (Linux) oppure usare llama.cpp",
     },
     "sglang": {
         "label": "SGLang",
-        "desc": "高吞吐推理框架（RadixAttention 前缀缓存、多卡并行），需 NVIDIA GPU + CUDA，使用 HuggingFace 权重",
+        "desc": "Framework di inferenza ad alto throughput (cache dei prefissi RadixAttention, parallelismo multi-GPU), richiede GPU NVIDIA + CUDA, usa pesi HuggingFace",
         "supported_os": ["linux", "macos"],
         "model_format": "safetensors",
-        "install_hint": "pip/uv 安装 sglang（需 Python 3.10+ 与 CUDA 环境）",
+        "install_hint": "Installare sglang con pip/uv (richiede Python 3.10+ e ambiente CUDA)",
         "default_cmd": "sglang",
-        # SGLang 官方安装说明面向 Linux + NVIDIA GPU
-        "windows_note": "SGLang 官方安装说明面向 Linux + NVIDIA GPU，请在 WSL2 (Linux) 中部署，或改用 llama.cpp",
+        # Le istruzioni ufficiali di installazione di SGLang riguardano Linux + GPU NVIDIA
+        "windows_note": "Le istruzioni ufficiali di installazione di SGLang riguardano Linux + GPU NVIDIA: distribuirlo in WSL2 (Linux) oppure usare llama.cpp",
     },
     "comfyui": {
         "label": "ComfyUI",
-        "desc": "节点式图像/视频生成引擎，本地部署开源视频模型（Wan2.1 / CogVideoX / LTX-Video 等），需 NVIDIA GPU 与大显存",
+        "desc": "Motore a nodi per la generazione di immagini/video, distribuisce in locale modelli video open source (Wan2.1 / CogVideoX / LTX-Video ecc.), richiede GPU NVIDIA e molta VRAM",
         "supported_os": ["windows", "linux", "macos"],
         "model_format": "safetensors",
         "task": "video",
-        "install_hint": "git clone ComfyUI + pip install -r requirements.txt（需 Python 3.10+ 与 CUDA）",
+        "install_hint": "git clone di ComfyUI + pip install -r requirements.txt (richiede Python 3.10+ e CUDA)",
         "default_cmd": "python main.py",
         "default_port": 8188,
-        "note": "视频生成模型显存需求高（量化版 6~24GB 不等），请按本机显存在商店筛选可跑的模型",
+        "note": "I modelli di generazione video richiedono molta VRAM (6~24GB nelle versioni quantizzate): filtrare nel negozio i modelli eseguibili in base alla VRAM della macchina",
     },
 }
 
 
 def get_adapter(executor, target: Target) -> EngineAdapter:
-    """按 target.engine_type 返回对应引擎适配器实例"""
+    """Restituisce l'istanza dell'adattatore del motore corrispondente a target.engine_type"""
     cls = _ADAPTERS.get(target.engine_type, LlamaCppAdapter)
     return cls(executor, target)
 
 
 def get_meta(engine_type: str) -> Optional[dict]:
-    """返回引擎元信息；未知类型返回 None"""
+    """Restituisce i metadati del motore; per un tipo sconosciuto restituisce None"""
     return ENGINE_META.get(engine_type)
 
 
 def is_supported_on(engine_type: str, os_name: str) -> bool:
-    """该引擎是否支持给定目标 OS"""
+    """Il motore supporta il sistema operativo di destinazione indicato?"""
     meta = ENGINE_META.get(engine_type)
     if not meta:
         return False
@@ -92,7 +92,7 @@ def is_supported_on(engine_type: str, os_name: str) -> bool:
 
 
 def list_engines() -> list:
-    """列出全部引擎（含 type 字段），供前端下拉/卡片渲染"""
+    """Elenca tutti i motori (con il campo type), per il rendering di menu/schede nel frontend"""
     out = []
     for et, meta in ENGINE_META.items():
         out.append({"type": et, **meta})

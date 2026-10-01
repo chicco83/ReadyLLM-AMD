@@ -1,6 +1,6 @@
-// 「ReadyLLM」品牌 Logo —— 纯矢量 SVG，自包含，可任意缩放
-// 设计：深色渐变圆角底 + 渐变环形进度弧（就绪/加载）+ 中心播放三角（一键部署运行）+ 绿色状态点（在线）
-// size 控制整体像素尺寸；渐变 id 用 rdl- 前缀避免与页面其它 SVG 冲突
+// Logo del marchio «ReadyLLM» — SVG vettoriale puro, autonomo, ridimensionabile a piacere
+// Design: fondo scuro sfumato ad angoli arrotondati + arco di avanzamento circolare sfumato (pronto/in caricamento) + triangolo play al centro (deploy ed esecuzione con un clic) + punto di stato verde (online)
+// size controlla la dimensione complessiva in pixel; l'id dei gradienti usa il prefisso rdl- per evitare conflitti con altri SVG della pagina
 
 export default function Logo({ size = 36, className = '' }) {
   return (
@@ -26,10 +26,10 @@ export default function Logo({ size = 36, className = '' }) {
         </linearGradient>
       </defs>
 
-      {/* 深色渐变圆角底 */}
+      {/* Fondo scuro sfumato ad angoli arrotondati */}
       <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#rdl-bg)" />
 
-      {/* 渐变环形进度弧：表达「就绪 / 加载」 */}
+      {/* Arco di avanzamento circolare sfumato: esprime «pronto / in caricamento» */}
       <circle
         cx="64"
         cy="64"
@@ -42,10 +42,10 @@ export default function Logo({ size = 36, className = '' }) {
         transform="rotate(-120 64 64)"
       />
 
-      {/* 中心播放三角：一键部署 / 运行 */}
+      {/* Triangolo play al centro: deploy / esecuzione con un clic */}
       <path d="M56 50 L82 64 L56 78 Z" fill="#ffffff" />
 
-      {/* 绿色状态点：在线 / 就绪 */}
+      {/* Punto di stato verde: online / pronto */}
       <circle cx="88" cy="40" r="6.5" fill="#34d399" />
     </svg>
   )

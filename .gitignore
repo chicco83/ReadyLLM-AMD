@@ -24,21 +24,21 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# ===== 本地配置 / 密钥（绝不入库）=====
+# ===== Configurazione locale / chiavi (mai nel repository) =====
 .env
 .env.*
 *.pem
 id_rsa*
 *.key
-# 用户机器配置（含 SSH 主机/密码等敏感信息，存于 ~ 目录，正常不会进仓库，这里再兜底）
+# Configurazione delle macchine utente (contiene dati sensibili come host/password SSH, salvata nella cartella ~, di norma non finisce nel repository, qui un'ulteriore rete di sicurezza)
 targets.json
 
-# ===== 日志 =====
+# ===== Log =====
 *.log
 logs/
 .makwo/
 
-# ===== 操作系统 / 编辑器 =====
+# ===== Sistema operativo / editor =====
 .DS_Store
 Thumbs.db
 .idea/

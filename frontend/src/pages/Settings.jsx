@@ -14,6 +14,7 @@ const EMPTY = {
   password: '',
   engine_type: 'llama_cpp',
   engine_path: '',
+  llama_backend: 'auto',
   models_dir: '',
   service_port: 8080,
 }
@@ -26,20 +27,20 @@ const OS_OPTIONS = [
 
 const OS_LABEL = { windows: 'Windows', macos: 'macOS', linux: 'Linux' }
 
-// llama.cpp 各系统的可执行文件路径示例
+// Esempi di percorso dell'eseguibile llama.cpp per ogni sistema
 function llamaPlaceholder(os) {
   if (os === 'windows') return 'C:\\llama\\llama-server.exe'
   if (os === 'macos') return '/opt/homebrew/bin/llama-server'
   return '/usr/local/bin/llama-server'
 }
-// 引擎路径占位提示：vLLM / SGLang 用命令名，llama.cpp 用完整路径
+// Segnaposto del percorso del motore: vLLM / SGLang usano il nome del comando, llama.cpp il percorso completo
 function enginePlaceholder(engineType, os, t) {
   if (engineType === 'vllm') return t('settings.vllmPlaceholder')
   if (engineType === 'sglang') return t('settings.sglangPlaceholder')
   return llamaPlaceholder(os)
 }
-// 引擎元信息文案：优先取当前语言的 engine.<type>.<field>，未命中键则回退后端下发值
-// （t() 缺键时原样返回 key，据此判断是否命中）
+// Testo dei metadati del motore: ha priorita' engine.<type>.<field> della lingua corrente, se la chiave non c'e' ripiega sul valore inviato dal backend
+// (se manca la chiave t() restituisce la chiave stessa, e su questo si decide se c'e' stata corrispondenza)
 function engineText(engineType, field, t, fallback = '') {
   if (!engineType) return fallback
   const key = `engine.${engineType}.${field}`
@@ -96,13 +97,13 @@ export default function Settings({ targets, onSaved, onChanged }) {
   }
 
   const isRemote = form.conn_type === 'ssh'
-  // 当前引擎元信息（来自后端单一数据源）
+  // Metadati del motore attuale (dalla fonte unica di dati del backend)
   const curEngine = engines.find(e => e.type === form.engine_type)
-  // 该引擎是否不支持当前目标 OS（如 vLLM + Windows）
+  // Il motore non supporta il sistema operativo di destinazione attuale? (es. vLLM + Windows)
   const engineOsUnsupported =
     curEngine && curEngine.supported_os && !curEngine.supported_os.includes(form.os)
 
-  // 拉取本机操作系统，本机模式下自动识别，无需用户手选
+  // Rileva il sistema operativo della macchina locale, in modalita' locale lo riconosce da solo, senza scelta manuale
   useEffect(() => {
     fetch('/api/target/local-os')
       .then(r => r.json())
@@ -113,14 +114,14 @@ export default function Settings({ targets, onSaved, onChanged }) {
         }
       })
       .catch(() => {})
-    // 拉取可用引擎元信息
+    // Recupera i metadati dei motori disponibili
     fetch('/api/target/engines')
       .then(r => r.json())
       .then(d => setEngines(d.engines || []))
       .catch(() => {})
   }, [])
 
-  // 切换连接方式时同步 OS：本机->用识别值，远程->保留/默认
+  // Quando si cambia il tipo di connessione sincronizza il sistema: locale -> valore rilevato, remoto -> mantiene/default
   function switchConn(v) {
     setForm(f => ({ ...f, conn_type: v, os: v === 'local' && localOs ? localOs : f.os }))
   }
@@ -142,6 +143,19 @@ export default function Settings({ targets, onSaved, onChanged }) {
     }
   }
 
+  // [2026-10-01 v1.1.0] Fix bug targets.json: il form partiva sempre da EMPTY senza `id`,
+  // quindi ogni salvataggio creava una nuova entry. Ora si puo' selezionare una macchina
+  // salvata (il form include il suo `id`) e il backend aggiorna invece di aggiungere.
+  // Versione precedente (sostituita): save() inviava form senza id, vedi git history.
+  function editTarget(tg) {
+    setForm({ ...EMPTY, ...tg, password: '' })
+    setTestResult(null)
+  }
+  function newTarget() {
+    setForm({ ...EMPTY, os: localOs || EMPTY.os })
+    setTestResult(null)
+  }
+
   async function save() {
     const res = await fetch('/api/target', {
       method: 'POST',
@@ -150,6 +164,8 @@ export default function Settings({ targets, onSaved, onChanged }) {
     })
     const d = await res.json()
     if (d.ok) {
+      // Dopo il salvataggio il form resta sulla entry salvata (con id): salvataggi successivi aggiornano
+      setForm(f => ({ ...f, id: d.id }))
       if (onSaved) onSaved(d.targets)
       setTestResult(null)
     }
@@ -161,6 +177,32 @@ export default function Settings({ targets, onSaved, onChanged }) {
       <p className="text-gray text-sm mb-6">
         {t('settings.subtitle')}
       </p>
+
+      {/* [2026-10-01 v1.1.0] Selettore delle macchine salvate: modifica o nuova */}
+      {targets?.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          <span className="text-sm text-gray">{t('settings.savedTargets')}</span>
+          {targets.map(tg => (
+            <button
+              key={tg.id}
+              onClick={() => editTarget(tg)}
+              className={`px-3 py-1 rounded-lg border text-sm transition ${
+                form.id === tg.id ? 'border-blue bg-blue/20 text-blue' : 'border-gray/40 text-fg/70'
+              }`}
+            >
+              {tg.name || tg.host || tg.id}
+            </button>
+          ))}
+          <button
+            onClick={newTarget}
+            className={`px-3 py-1 rounded-lg border text-sm transition ${
+              !form.id ? 'border-green bg-green/20 text-green' : 'border-gray/40 text-fg/70'
+            }`}
+          >
+            + {t('settings.newTarget')}
+          </button>
+        </div>
+      )}
 
       <div className="bg-card rounded-xl p-6 border border-gray/30">
         <Field label={t('settings.name')}>
@@ -261,6 +303,23 @@ export default function Settings({ targets, onSaved, onChanged }) {
           />
         </Field>
 
+        {/* [2026-10-01 v1.1.0] Scelta backend llama.cpp (ROCm / Vulkan / CUDA / CPU) */}
+        {form.engine_type === 'llama_cpp' && (
+          <Field label={t('settings.llamaBackend')} hint={t('settings.llamaBackendHint')}>
+            <SegButtons
+              value={form.llama_backend || 'auto'}
+              options={[
+                ['auto', t('settings.backend.auto')],
+                ['cuda', 'CUDA'],
+                ['rocm', 'ROCm (HIP)'],
+                ['vulkan', 'Vulkan'],
+                ['cpu', 'CPU'],
+              ]}
+              onChange={v => set('llama_backend', v)}
+            />
+          </Field>
+        )}
+
         <Field
           label={t('settings.modelsDir')}
           hint={
@@ -313,7 +372,7 @@ export default function Settings({ targets, onSaved, onChanged }) {
         )}
       </div>
 
-      {/* 引擎安装面板 */}
+      {/* Pannello di installazione dei motori */}
       {targets?.length > 0 && (
         <div className="mt-8">
           <h2 className="text-xl font-bold mb-2">{t('settings.engines')}</h2>

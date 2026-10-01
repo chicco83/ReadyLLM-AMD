@@ -5,7 +5,7 @@ import { useI18n } from '../i18n/I18nContext'
 
 const MAX_POINTS = 60
 
-// 递进式单位：1.8M / 208K / 950，方便阅读大数字
+// Unita' progressive: 1.8M / 208K / 950, per leggere piu' facilmente i numeri grandi
 function fmtTokens(n) {
   if (n == null) return null
   if (n >= 1e6) return `${(n / 1e6).toFixed(n % 1e6 ? 1 : 0)}M`
@@ -61,7 +61,7 @@ export default function Monitor({ targetId }) {
   const [tokenStats, setTokenStats] = useState([])
   const [tokenTotal, setTokenTotal] = useState({ prompt: 0, completion: 0, total: 0 })
 
-  // Token 用量统计（按天 + 累计，后端持久化）：进入时拉取，每 60s 刷新
+  // Statistiche d'uso dei token (per giorno + cumulato, persistite dal backend): all'ingresso le carica, aggiorna ogni 60s
   useEffect(() => {
     if (!targetId) return
     const load = () => {
@@ -79,12 +79,12 @@ export default function Monitor({ targetId }) {
     return () => clearInterval(timer)
   }, [targetId])
 
-  // 切换目标机器时清空历史
+  // Cambiando macchina target si azzera la cronologia
   useEffect(() => {
     setHistory({ speed: [], cache: [], spec: [] })
   }, [targetId])
 
-  // 每 10s 采集一次；值有变化才追加描点，没变化不描
+  // Raccolta ogni 10s; si aggiunge un punto solo se il valore e' cambiato, altrimenti non si disegna
   useEffect(() => {
     if (!data?.metrics) return
     const m = data.metrics
@@ -116,7 +116,7 @@ export default function Monitor({ targetId }) {
         </div>
       </div>
 
-      {/* GPU + CPU 并排 */}
+      {/* GPU + CPU affiancate */}
       <div className="grid grid-cols-2 gap-4 mb-4">
         <div className="bg-card rounded-xl p-4 border border-gray/30">
           <div className="text-sm font-semibold text-yellow mb-3">GPU</div>
@@ -159,7 +159,7 @@ export default function Monitor({ targetId }) {
         </div>
       </div>
 
-      {/* 推理指标数值 */}
+      {/* Valori delle metriche di inferenza */}
       <div className="grid grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
         <MetricCard label="Prompt Tokens" value={fmtTokens(metrics.prompt_tokens)} color="text-blue" />
         <MetricCard label={t('monitor.completionTokens')} value={fmtTokens(metrics.completion_tokens)} color="text-green" />
@@ -169,14 +169,14 @@ export default function Monitor({ targetId }) {
         <MetricCard label={t('monitor.specAccept')} value={metrics.spec_accept_rate} unit="%" color="text-teal" />
       </div>
 
-      {/* 曲线图 */}
+      {/* Grafici a curve */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <ChartPanel title={t('monitor.chartSpeed')} data={h.speed} dataKey="value" color="#a6e3a1" unit=" t/s" />
         <ChartPanel title={t('monitor.chartCache')} data={h.cache} dataKey="value" color="#cba6f7" unit="%" />
         <ChartPanel title={t('monitor.chartSpec')} data={h.spec} dataKey="value" color="#94e2d5" unit="%" />
       </div>
 
-      {/* Token 用量统计（按天，输入/输出） */}
+      {/* Statistiche d'uso dei token (per giorno, input/output) */}
       <div className="bg-card rounded-lg p-4 border border-gray/30 mt-4">
         <div className="flex items-center justify-between mb-2">
           <div className="text-sm font-semibold">{t('monitor.tokenUsage')}</div>

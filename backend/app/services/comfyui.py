@@ -1,18 +1,18 @@
-"""ComfyUI 引擎适配器（视频 / 图像生成）
+"""Adattatore del motore ComfyUI (generazione di video / immagini)
 
-ComfyUI 与 llama.cpp / vLLM 的交互范式根本不同：它不是"加载模型后持续推理
-吐 token"，而是"HTTP 服务常驻 → 提交一个 workflow 节点图 JSON → 排队异步生成
-→ 轮询 history 取产物文件"。因此本适配器除实现 EngineAdapter 基础契约外，
-额外提供提交生成任务、查询进度 / 产物 / 显存的方法。
+Il paradigma di interazione di ComfyUI e' radicalmente diverso da llama.cpp / vLLM: non «carica un modello e poi continua a inferire
+emettendo token», ma «servizio HTTP sempre attivo -> invio del JSON di un grafo di nodi workflow -> generazione asincrona in coda
+-> polling di history per ottenere i file prodotti». Percio' questo adattatore, oltre a implementare il contratto base di EngineAdapter,
+fornisce in piu' i metodi per inviare task di generazione e interrogare avanzamento / prodotti / VRAM.
 
-关键约束：
-  - ComfyUI 监听在目标机本地（默认 127.0.0.1:<port>），本机（控制端）访问不到，
-    所有 HTTP 请求必须在目标机上用 curl 发起（与 collectors 采集 metrics 同套路）。
-  - workflow JSON 体积可能较大，统一用 write_file 落盘 + curl @file，绕开命令行
-    长度限制（Windows cmd 8191 字符上限，见已验证的 _curl_completion 经验）。
-  - 不硬编码任何个人环境：安装目录 / python 入口 / 端口全部来自 Target 配置。
+Vincoli chiave:
+  - ComfyUI ascolta in locale sulla macchina target (default 127.0.0.1:<port>), non raggiungibile dalla macchina locale (controller),
+    quindi tutte le richieste HTTP devono partire dalla macchina target con curl (stesso schema con cui collectors raccoglie le metriche).
+  - Il JSON del workflow puo' essere grande: si usa sempre write_file su disco + curl @file, aggirando il limite di lunghezza
+    della riga di comando (limite di 8191 caratteri di Windows cmd, vedi l'esperienza gia' verificata di _curl_completion).
+  - Nessun ambiente personale cablato nel codice: cartella di installazione / entry point python / porta provengono tutti dalla configurazione del Target.
 
-所有命令基于用户配置的 Target 执行。
+Tutti i comandi operano sul Target configurato dall'utente.
 """
 
 import base64
@@ -28,11 +28,11 @@ from ..models.target import Target
 
 
 def _path_join(target: Target, base: str, name: str) -> str:
-    """按目标 OS 拼接路径（base 为目录，name 为文件名）。"""
+    """Concatena i percorsi secondo il sistema operativo di destinazione (base e' la cartella, name il nome del file)."""
     sep = "\\" if target.os == "windows" else "/"
     return base.rstrip("\\/") + sep + name
 
-# ComfyUI 默认服务端口（Target.service_port 未显式配置时回退）
+# Porta di servizio predefinita di ComfyUI (ripiego quando Target.service_port non e' configurata esplicitamente)
 DEFAULT_COMFY_PORT = 8188
 
 
@@ -48,27 +48,27 @@ class ComfyUIAdapter(EngineAdapter):
     def name(self) -> str:
         return "comfyui"
 
-    # ==================== 路径 / 命令解析 ====================
+    # ==================== Risoluzione di percorsi / comandi ====================
 
     def _comfy_dir(self) -> str:
-        """ComfyUI 安装根目录：来自 engine_path（用户配置），否则回退常见默认。
-        注意：这里不写死任何个人机器路径，回退值只是通用约定位置。"""
+        """Cartella radice di installazione di ComfyUI: proviene da engine_path (configurazione dell'utente), altrimenti ripiega su un default comune.
+        Nota: qui non si cabla alcun percorso di macchine personali, il valore di ripiego e' solo una posizione convenzionale generica."""
         return self.target.engine_path or ""
 
     def _python_cmd(self) -> str:
-        """启动用的 python 解释器。注意：engine_path 是 ComfyUI 安装根目录，
-        绝不能当 python 解释器用（历史 bug 导致启动命令把目录名当可执行文件，
-        进程起不来）。这里回退到 PATH 中的 python；Windows 便携版由 _start_windows
-        的 bat 内联探测 python_embeded/python 子目录覆盖。"""
+        """Interprete python usato per l'avvio. Attenzione: engine_path e' la cartella radice di installazione di ComfyUI,
+        non deve mai essere usato come interprete python (un bug storico faceva usare il nome della cartella come eseguibile nel comando di avvio,
+        e il processo non partiva). Qui si ripiega sul python nel PATH; la versione portatile per Windows e' coperta da _start_windows,
+        il cui bat rileva in linea la sottocartella python_embeded/python."""
         return "python"
 
     def _base_url(self) -> str:
         return f"http://127.0.0.1:{_comfy_port(self.target)}"
 
-    # ==================== 检测 ====================
+    # ==================== Rilevamento ====================
 
     def check_installed(self) -> bool:
-        """检测 ComfyUI 是否已安装：main.py 入口文件是否存在。"""
+        """Rileva se ComfyUI e' installato: il file di ingresso main.py esiste?"""
         d = self._comfy_dir()
         if not d:
             return False
@@ -79,24 +79,24 @@ class ComfyUIAdapter(EngineAdapter):
             result = self.executor.run(f'test -f "{main_py}" && echo FOUND')
         return "FOUND" in result.stdout
 
-    # ==================== 启动 / 停止 ====================
+    # ==================== Avvio / Arresto ====================
 
     def start(self, params: StartParams) -> tuple:
-        """后台启动 ComfyUI 服务。params.model_path 在 ComfyUI 语义下不使用
-        （模型由 workflow 指定），这里仅用于日志展示。"""
+        """Avvia in background il servizio ComfyUI. params.model_path nella semantica di ComfyUI non si usa
+        (il modello e' indicato dal workflow), qui serve solo per la visualizzazione nel log."""
         port = _comfy_port(self.target)
         d = self._comfy_dir()
         if not d:
-            return False, "未配置 ComfyUI 安装目录（engine_path 应指向 ComfyUI 根目录）"
+            return False, "Cartella di installazione di ComfyUI non configurata (engine_path deve puntare alla cartella radice di ComfyUI)"
         main_py = _path_join(self.target, d, "main.py")
-        # --listen 0.0.0.0 便于本机端口转发访问；--port 指定端口
-        # --disable-async-offload --disable-mmap：绕开 comfy_aimdo 异步权重 I/O
-        # 后端在 VAE 解码读 safetensors 分片时的 read_file_slice failed（实测
-        # RTX4090+H3 必现，关掉后回退普通加载，采样+解码全通过并成功出片）。
-        # --disable-smart-memory：禁用智能显存管理，模型加载后不主动换出。
-        # 长视频多段场景关键：smart-memory 会在任务间把 video_vae 换出显存，
-        # 下一段 I2V 冷加载 vae.encode 时又撞 aimdo read_file_slice failed；
-        # 常驻不换出即从根上不触发该冷加载路径。
+        # --listen 0.0.0.0 facilita l'accesso con inoltro di porta dalla macchina locale; --port indica la porta
+        # --disable-async-offload --disable-mmap: aggirano il read_file_slice failed del backend
+        # di I/O asincrono dei pesi comfy_aimdo durante la lettura dei frammenti safetensors nella decodifica VAE (misurato:
+        # si presenta sempre con RTX4090+H3; disattivandoli si ripiega sul caricamento normale, campionamento+decodifica passano tutti e il video viene prodotto).
+        # --disable-smart-memory: disattiva la gestione intelligente della VRAM, dopo il caricamento i modelli non vengono scaricati proattivamente.
+        # Fondamentale per gli scenari di video lungo a piu' segmenti: smart-memory scarica video_vae dalla VRAM tra un task e l'altro,
+        # e al caricamento a freddo di vae.encode nel segmento I2V successivo si ricade in aimdo read_file_slice failed;
+        # tenendolo residente senza scaricarlo si evita alla radice quel percorso di caricamento a freddo.
         run_args = (
             f'"{main_py}" --listen 0.0.0.0 --port {port} '
             '--disable-async-offload --disable-mmap --disable-smart-memory'
@@ -107,9 +107,9 @@ class ComfyUIAdapter(EngineAdapter):
         return self._start_linux(d, run_args)
 
     def _start_windows(self, d: str, run_args: str) -> tuple:
-        # bat 内联探测 python：优先便携版 python_embeded/python.exe，
-        # 其次 python/python.exe，最后回退 PATH 中的 python。避免把 ComfyUI
-        # 目录名当解释器（历史 bug）或 PATH 无 python 导致进程起不来。
+        # Il bat rileva in linea python: prima la versione portatile python_embeded/python.exe,
+        # poi python/python.exe, infine ripiega sul python nel PATH. Evita di usare come interprete il nome della cartella di ComfyUI
+        # (bug storico) o che il processo non parta perche' nel PATH non c'e' python.
         bat_content = (
             '@echo off\r\n'
             f'cd /d "{d}"\r\n'
@@ -128,44 +128,44 @@ class ComfyUIAdapter(EngineAdapter):
         )
         result = self.executor.run(write_cmd, timeout=15)
         if not result.ok:
-            return False, f"写入启动脚本失败: {result.stdout} {result.stderr}"
+            return False, f"Scrittura dello script di avvio non riuscita: {result.stdout} {result.stderr}"
         run_cmd = (
             'schtasks /create /tn ComfyUI /tr "%s" /sc once /st 00:00 /f '
             '&& schtasks /run /tn ComfyUI' % bat_path
         )
         result = self.executor.run(run_cmd, timeout=15)
         if not result.ok:
-            return False, f"启动失败: {result.stdout} {result.stderr}"
-        return True, "ComfyUI 启动命令已发送（首次启动需加载依赖，请耐心等待）"
+            return False, f"Avvio non riuscito: {result.stdout} {result.stderr}"
+        return True, "Comando di avvio di ComfyUI inviato (al primo avvio devono caricarsi le dipendenze, attendere con pazienza)"
 
     def _start_linux(self, d: str, run_args: str) -> tuple:
         py = self._python_cmd()
         cmd = f'cd "{d}" && nohup {py} {run_args} > /tmp/comfyui.log 2>&1 &'
         result = self.executor.run(cmd, timeout=20)
         if not result.ok:
-            return False, f"启动失败: {result.stdout} {result.stderr}"
-        return True, "ComfyUI 启动命令已发送"
+            return False, f"Avvio non riuscito: {result.stdout} {result.stderr}"
+        return True, "Comando di avvio di ComfyUI inviato"
 
     def stop(self) -> tuple:
         if self.target.os == "windows":
             self.executor.run('schtasks /end /tn ComfyUI', timeout=10)
             result = self.executor.run("taskkill /f /im python.exe", timeout=10)
-            # taskkill python.exe 过宽，但 ComfyUI 在 Windows 通常就是 python 进程；
-            # 更精确需按端口杀，这里保持与 llama 一致的尽力而为策略
+            # taskkill python.exe e' troppo ampio, ma su Windows ComfyUI di solito e' proprio un processo python;
+            # per essere piu' precisi servirebbe terminare per porta, qui si mantiene la stessa strategia «best effort» di llama
         else:
             result = self.executor.run("pkill -f 'ComfyUI/main.py'", timeout=10)
         if result.ok:
-            return True, "ComfyUI 服务已停止"
-        return False, f"停止结果: {result.stdout} {result.stderr}"
+            return True, "Servizio ComfyUI fermato"
+        return False, f"Esito dell'arresto: {result.stdout} {result.stderr}"
 
     def is_running(self) -> bool:
-        # 健康检查：ComfyUI 提供 /system_stats，能连通即视为运行中
+        # Controllo di salute: ComfyUI fornisce /system_stats, se e' raggiungibile si considera in esecuzione
         return self._curl_json("/system_stats", timeout=8) is not None
 
     def get_metrics_url(self) -> str:
         return f"{self._base_url()}/system_stats"
 
-    # ==================== 生成任务（ComfyUI 专属） ====================
+    # ==================== Task di generazione (specifici di ComfyUI) ====================
 
     def _remote_tmp(self, name: str) -> str:
         if self.target.os == "windows":
@@ -173,7 +173,7 @@ class ComfyUIAdapter(EngineAdapter):
         return f"/tmp/{name}"
 
     def _curl_json(self, path: str, timeout: int = 10) -> Optional[dict]:
-        """在目标机上 curl 一个 GET 端点并解析 JSON；失败返回 None。"""
+        """Esegue curl su un endpoint GET sulla macchina target e interpreta il JSON; in caso di errore restituisce None."""
         url = f"{self._base_url()}{path}"
         if self.target.os == "windows":
             cmd = f'curl -s --max-time {timeout} "{url}"'
@@ -189,16 +189,16 @@ class ComfyUIAdapter(EngineAdapter):
             return None
 
     def submit_workflow(self, workflow: dict, client_id: Optional[str] = None) -> tuple:
-        """提交一个 workflow 节点图 JSON 到 /prompt，返回 (ok, prompt_id 或错误)。
+        """Invia a /prompt il JSON di un grafo di nodi workflow, restituisce (ok, prompt_id o errore).
 
-        workflow 已是 ComfyUI 标准 prompt 格式（非 UI 导出的 litegraph 格式）。
-        大 JSON 用 write_file 落盘 + curl @file，避免命令行截断。"""
+        Il workflow e' gia' nel formato prompt standard di ComfyUI (non il formato litegraph esportato dalla UI).
+        I JSON grandi usano write_file su disco + curl @file, per evitare il troncamento della riga di comando."""
         cid = client_id or uuid.uuid4().hex
         payload = {"prompt": workflow, "client_id": cid}
         body = json.dumps(payload, ensure_ascii=False)
         tmp = self._remote_tmp(f"comfy_prompt_{cid}.json")
         if not self.executor.write_file(body, tmp):
-            return False, "写入 workflow 临时文件失败"
+            return False, "Scrittura del file temporaneo del workflow non riuscita"
 
         url = f"{self._base_url()}/prompt"
         if self.target.os == "windows":
@@ -210,33 +210,33 @@ class ComfyUIAdapter(EngineAdapter):
         try:
             data = json.loads(out)
         except (ValueError, json.JSONDecodeError):
-            return False, f"提交失败，响应无法解析: {out[:300]}"
+            return False, f"Invio non riuscito, risposta non interpretabile: {out[:300]}"
         if "prompt_id" in data:
             return True, data["prompt_id"]
-        # ComfyUI 校验失败会返回 error 详情
+        # Se la validazione di ComfyUI fallisce restituisce il dettaglio dell'errore
         err = data.get("error") or data
-        return False, f"workflow 被拒绝: {json.dumps(err, ensure_ascii=False)[:400]}"
+        return False, f"Workflow rifiutato: {json.dumps(err, ensure_ascii=False)[:400]}"
 
     def get_history(self, prompt_id: str) -> Optional[dict]:
-        """查询任务历史；任务完成后 outputs 里含产物（视频/图片）文件信息。"""
+        """Interroga la cronologia dei task; a task completato in outputs ci sono le informazioni sui file prodotti (video/immagini)."""
         return self._curl_json(f"/history/{prompt_id}", timeout=10)
 
     def get_queue(self) -> Optional[dict]:
-        """查询队列：running + pending，用于判断任务是否在跑。"""
+        """Interroga la coda: running + pending, per stabilire se il task e' in esecuzione."""
         return self._curl_json("/queue", timeout=8)
 
     def get_progress(self, prompt_id: str) -> dict:
-        """返回任务粗粒度状态（不依赖 WebSocket，纯轮询）：
+        """Restituisce lo stato a grana grossa del task (senza dipendere da WebSocket, solo polling):
         {state: queued|running|completed|unknown, ...}
 
-        ComfyUI 的逐步进度(step/total)只在 WebSocket 推送，HTTP 侧无法直接拿；
-        P0 用队列 + history 推断状态，进度条以'排队/生成中/完成'三态呈现。"""
+        L'avanzamento passo-passo (step/total) di ComfyUI viene spinto solo via WebSocket, lato HTTP non e' ottenibile direttamente;
+        P0 deduce lo stato da coda + history, la barra di avanzamento mostra i tre stati «in coda/in generazione/completato»."""
         hist = self.get_history(prompt_id)
         if hist and prompt_id in hist:
             entry = hist[prompt_id]
             status = entry.get("status", {}) or {}
-            # 关键：history 里有记录 ≠ 成功。ComfyUI 执行报错时也会写入 history，
-            # 必须先看 status_str，否则失败段会被误判成 completed（outputs 为空）。
+            # Punto chiave: un record in history != successo. ComfyUI scrive in history anche quando l'esecuzione da' errore,
+            # bisogna prima guardare status_str, altrimenti un segmento fallito viene scambiato per completed (con outputs vuoto).
             if status.get("status_str") == "error":
                 msg = ""
                 for m in status.get("messages", []) or []:
@@ -246,13 +246,13 @@ class ComfyUIAdapter(EngineAdapter):
                             info.get("exception_message", "").strip(),
                             info.get("node_type", ""))
                         break
-                return {"state": "error", "message": msg or "ComfyUI 执行报错"}
+                return {"state": "error", "message": msg or "Errore di esecuzione di ComfyUI"}
             outputs = entry.get("outputs", {})
             return {"state": "completed", "outputs": outputs}
         q = self.get_queue()
         if q:
             for item in q.get("queue_running", []):
-                # item[1] 是 prompt_id
+                # item[1] e' il prompt_id
                 if len(item) > 1 and item[1] == prompt_id:
                     return {"state": "running"}
             for item in q.get("queue_pending", []):
@@ -261,13 +261,13 @@ class ComfyUIAdapter(EngineAdapter):
         return {"state": "unknown"}
 
     def get_system_stats(self) -> Optional[dict]:
-        """显存 / 设备信息：/system_stats 返回 devices 列表含 vram_total/vram_free。"""
+        """Informazioni su VRAM / dispositivi: /system_stats restituisce l'elenco devices con vram_total/vram_free."""
         return self._curl_json("/system_stats", timeout=8)
 
-    # ==================== 健康等待辅助 ====================
+    # ==================== Aiuto per l'attesa dello stato di salute ====================
 
     def wait_ready(self, max_wait: int = 60) -> bool:
-        """轮询直到 ComfyUI 可响应（首次启动加载依赖较慢时用）。"""
+        """Fa polling finche' ComfyUI non risponde (utile quando il primo avvio, con il caricamento delle dipendenze, e' lento)."""
         deadline = time.time() + max_wait
         while time.time() < deadline:
             if self.is_running():
@@ -276,9 +276,9 @@ class ComfyUIAdapter(EngineAdapter):
         return False
 
 
-    # ==================== 视频生成 workflow 模板（MiniMax H3） ====================
+    # ==================== Template di workflow per la generazione video (MiniMax H3) ====================
 
-    # H3 默认权重文件名（Comfy-Org/MiniMax-H3 重打包，24G 显存极限压缩组合）
+    # Nomi di file dei pesi predefiniti di H3 (riconfezionamento Comfy-Org/MiniMax-H3, combinazione compressa al limite per 24G di VRAM)
     H3_UNET = "minimax_h3_fl2va_pruned_int8_convrot.safetensors"
     H3_CLIP = "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
     H3_VAE_VIDEO = "minimax_h3_video_vae_fp16.safetensors"
@@ -302,25 +302,25 @@ class ComfyUIAdapter(EngineAdapter):
         teacache: bool = False,
         teacache_thresh: float = 0.15,
     ) -> dict:
-        """构建 MiniMax H3 text-to-video / image-to-video 的 ComfyUI API prompt（扁平格式）。
+        """Costruisce il prompt API di ComfyUI (formato piatto) per text-to-video / image-to-video di MiniMax H3.
 
-        image_name 非空时走 I2V：在 ComfyUI input 目录里加载该首帧图，连到
-        MiniMaxH3ImageToVideo 的 first_frame 端口（该节点内部自 vae.encode，
-        无需额外 VAEEncode 节点）。为空则是纯 T2V。
+        Se image_name non e' vuoto si usa I2V: carica quell'immagine del primo fotogramma dalla cartella input di ComfyUI e la collega alla porta first_frame di
+        MiniMaxH3ImageToVideo (il nodo esegue internamente vae.encode,
+        non serve alcun nodo VAEEncode aggiuntivo). Se vuoto e' T2V puro.
 
-        官方 T2V workflow 用 ComfyUI 新版「子图(subgraph)」封装生成逻辑，
-        /prompt 端点只接受扁平 API 格式，故这里把子图内部 21 节点展平为
-        顶层 API prompt，并把子图对外参数（prompt/分辨率/时长/seed/权重名）
-        注入到对应节点。结构依据 Comfy-Org/workflow_templates 的
-        video_minimax_h3_t2v.json 实测解析（节点 119-139 + SaveVideo）。
+        Il workflow T2V ufficiale incapsula la logica di generazione nei nuovi «sottografi (subgraph)» di ComfyUI,
+        l'endpoint /prompt accetta solo il formato API piatto, quindi qui i 21 nodi interni del sottografo vengono appiattiti nel
+        prompt API di primo livello, e i parametri esterni del sottografo (prompt/risoluzione/durata/seed/nome dei pesi)
+        vengono iniettati nei nodi corrispondenti. La struttura si basa sull'analisi misurata di video_minimax_h3_t2v.json
+        di Comfy-Org/workflow_templates (nodi 119-139 + SaveVideo).
 
-        参数：
-          prompt    正向提示词（H3 无独立负面提示词节点，negative 忽略）
-          duration  时长秒（H3 用公式换算帧数 length，非直接帧数）
-          steps     采样步数（turbo lora 推荐 8）
-          seed      随机种子（None 则随机）
-        权重文件名固定为 24G 显存极限压缩组合（pruned+int8_convrot UNet、
-        nvfp4 文本编码器、双 VAE、8step turbo lora），如需换档改类常量。
+        Parametri:
+          prompt    prompt positivo (H3 non ha un nodo di prompt negativo indipendente, negative viene ignorato)
+          duration  durata in secondi (H3 converte in numero di fotogrammi length con una formula, non e' direttamente il numero di fotogrammi)
+          steps     passi di campionamento (con turbo lora si consiglia 8)
+          seed      seme casuale (None = casuale)
+        I nomi dei file dei pesi sono fissati sulla combinazione compressa al limite per 24G di VRAM (UNet pruned+int8_convrot,
+        codificatore testuale nvfp4, doppio VAE, turbo lora a 8 step); per cambiare livello si modificano le costanti della classe.
         """
         sd = seed if seed is not None else int(uuid.uuid4().int % (2 ** 32 - 1))
         unet = model_name or self.H3_UNET
@@ -336,11 +336,11 @@ class ComfyUIAdapter(EngineAdapter):
             "134": {"class_type": "LoraLoaderModelOnly",
                     "inputs": {"model": ["127", 0], "lora_name": self.H3_LORA_8STEP,
                                "strength_model": 1.0}},
-            # use_turbo=False -> switch 走 on_false(原始 UNet)；True -> on_true(LoRA)
+            # use_turbo=False -> lo switch va su on_false (UNet originale); True -> on_true (LoRA)
             "139": {"class_type": "PrimitiveBoolean", "inputs": {"value": True}},
             "135": {"class_type": "ComfySwitchNode",
                     "inputs": {"on_false": ["127", 0], "on_true": ["134", 0], "switch": ["139", 0]}},
-            # steps 切换：turbo 用 138(注入 steps)，非 turbo 用 137(固定 20)
+            # Cambio degli steps: turbo usa 138 (steps iniettati), non turbo usa 137 (fissi a 20)
             "138": {"class_type": "PrimitiveInt", "inputs": {"value": steps}},
             "137": {"class_type": "PrimitiveInt", "inputs": {"value": 20}},
             "136": {"class_type": "ComfySwitchNode",
@@ -350,7 +350,7 @@ class ComfyUIAdapter(EngineAdapter):
                     "inputs": {"model": ["135", 0], "scheduler": "simple",
                                "steps": ["136", 0], "denoise": 1.0}},
             "129": {"class_type": "RandomNoise", "inputs": {"noise_seed": sd}},
-            # 帧数 length -> H3 合法的 17 对齐帧数（PrimitiveFloat=length -> MathExpression）
+            # Numero di fotogrammi length -> numero di fotogrammi valido allineato a 17 per H3 (PrimitiveFloat=length -> MathExpression)
             "133": {"class_type": "PrimitiveFloat", "inputs": {"value": float(length)}},
             "132": {"class_type": "ComfyMathExpression",
                     "inputs": {"expression": "max(5, a) + (5 - (max(5, a) % 17)) % 17",
@@ -373,11 +373,11 @@ class ComfyUIAdapter(EngineAdapter):
                    "inputs": {"video": ["130", 0], "filename_prefix": "modeldeploy/video",
                               "format": "auto"}},
         }
-        # R2V：有参考图时，把节点 131 换成 MiniMaxH3ReferenceToVideo，用
-        # ref_image_N autogrow 端口连多张 LoadImage。身份由模型内部对齐
-        # （参考 token 随每个采样步贯穿），比"逐镜预生成锚帧"可靠——文生图
-        # 跨图人脸不一致，而 R2V 直接拿参考图锁身份。prompt 用 <Picture i> 引用。
-        # 注意：R2V 比 I2V 多一个 audio_vae 输入（节点 120 工作流里已存在）。
+        # R2V: quando c'e' un'immagine di riferimento, sostituisce il nodo 131 con MiniMaxH3ReferenceToVideo, usando
+        # le porte autogrow ref_image_N per collegare piu' LoadImage. L'identita' e' allineata internamente dal modello
+        # (i token di riferimento attraversano ogni passo di campionamento), piu' affidabile del «pre-generare un fotogramma di ancoraggio per inquadratura»: il testo-a-immagine
+        # produce volti incoerenti tra immagini diverse, mentre R2V blocca l'identita' direttamente con le immagini di riferimento. Il prompt le cita con <Picture i>.
+        # Nota: R2V ha un ingresso audio_vae in piu' rispetto a I2V (il nodo 120 e' gia' presente nel workflow).
         if ref_image_names:
             wf["131"] = {"class_type": "MiniMaxH3ReferenceToVideo",
                          "inputs": {"clip": ["128", 0], "vae": ["119", 0],
@@ -385,9 +385,9 @@ class ComfyUIAdapter(EngineAdapter):
                                     "width": width, "height": height,
                                     "length": ["132", 1],
                                     "ref_image_size": "match"}}
-            # ref_images 是 Autogrow 输入，API 格式须序列化为嵌套 dict
-            # {ref_image_0: [node,port], ref_image_1: ...}，不能把 ref_image_0
-            # 当顶层参数（否则 execute 收到 unexpected kwarg 'ref_image_0'）。
+            # ref_images e' un ingresso Autogrow, nel formato API va serializzato come dict annidato
+            # {ref_image_0: [node,port], ref_image_1: ...}, non si puo' passare ref_image_0
+            # come parametro di primo livello (altrimenti execute riceve l'argomento inatteso 'ref_image_0').
             ref_map = {}
             for i, name in enumerate(ref_image_names[:9]):
                 nid = "15%d" % i  # 150,151,...
@@ -395,13 +395,13 @@ class ComfyUIAdapter(EngineAdapter):
                 ref_map["ref_image_%d" % i] = [nid, 0]
             wf["131"]["inputs"]["ref_images"] = ref_map
         elif image_name:
-            # I2V：有首帧图时挂 LoadImage 节点，连到 MiniMaxH3ImageToVideo.first_frame
+            # I2V: quando c'e' un'immagine del primo fotogramma si aggancia un nodo LoadImage, collegato a MiniMaxH3ImageToVideo.first_frame
             wf["140"] = {"class_type": "LoadImage",
                          "inputs": {"image": image_name}}
             wf["131"]["inputs"]["first_frame"] = ["140", 0]
-        # TeaCache：在最终模型(135)与 guider/scheduler 之间插缓存节点，跳过相邻
-        # 冗余去噪步。total_steps 必须等于实际采样步数(steps)，否则缓存窗口错位。
-        # start_step=2/end_step=-2：首 2 步(定结构)与末 2 步(定细节)始终真实计算。
+        # TeaCache: tra il modello finale (135) e guider/scheduler si inserisce un nodo di cache, saltando i passi di denoising
+        # adiacenti ridondanti. total_steps deve essere uguale al numero reale di passi di campionamento (steps), altrimenti la finestra della cache si sfasa.
+        # start_step=2/end_step=-2: i primi 2 passi (che definiscono la struttura) e gli ultimi 2 (che definiscono i dettagli) vengono sempre calcolati realmente.
         if teacache:
             wf["145"] = {"class_type": "MiniMaxH3TeaCache",
                          "inputs": {"model": ["135", 0],
@@ -420,14 +420,14 @@ class ComfyUIAdapter(EngineAdapter):
         model_name: str = "RealESRGAN_x4plus.pth",
         filename_prefix: str = "modeldeploy/upscaled",
     ) -> dict:
-        """构建单图超分 ComfyUI API prompt（扁平格式）。
+        """Costruisce il prompt API di ComfyUI (formato piatto) per la super-risoluzione di una singola immagine.
 
-        链路：LoadImage → UpscaleModelLoader → ImageUpscaleWithModel
-        → ImageScale(精确缩到 out_w×out_h) → SaveImage。
+        Catena: LoadImage -> UpscaleModelLoader -> ImageUpscaleWithModel
+        -> ImageScale (riduzione precisa a out_w x out_h) -> SaveImage.
 
-        RealESRGAN_x4plus 固定 4× 放大，832×480 会先变 3328×1920，再用
-        ImageScale(lancos/downscale) 收敛到目标 1920×1080，避免尺寸失控。
-        image_name 须是 ComfyUI input 目录里已存在的图（参考图/抽帧图）。
+        RealESRGAN_x4plus ingrandisce sempre 4x: 832x480 diventa prima 3328x1920, poi con
+        ImageScale (lanczos/downscale) converge al target 1920x1080, evitando dimensioni fuori controllo.
+        image_name deve essere un'immagine gia' presente nella cartella input di ComfyUI (immagine di riferimento / fotogramma estratto).
         """
         return {
             "200": {"class_type": "LoadImage", "inputs": {"image": image_name}},

@@ -1,21 +1,21 @@
-"""视频提示词编排（路线 A：LLM 参数编排 + 官方结构化格式）
+"""Orchestrazione dei prompt video (percorso A: orchestrazione dei parametri con LLM + formato strutturato ufficiale)
 
-把用户一句话的粗略画面描述，交给大模型扩写，再按 MiniMax H3 官方提示词
-格式（见 h3_prompt_format.py）拼装成最终 prompt。目标是"用户不自己编排，
-也能拿到踩在 H3 训练分布上的高质量出片"。
+Affida a un modello di grandi dimensioni l'espansione di una breve descrizione grezza dell'immagine data dall'utente, poi la assembla nel prompt finale secondo il formato
+ufficiale dei prompt MiniMax H3 (vedi h3_prompt_format.py). L'obiettivo e' che «l'utente, senza orchestrare da se',
+ottenga comunque video di alta qualita' che rientrano nella distribuzione di addestramento di H3».
 
-为什么不让 LLM 直接吐最终 prompt：实测自由英文散文质量差，根因是没踩到
-H3 的结构化字段格式（integrated_multimodal_description / retention_analysis
-等）。格式正确性交给代码拼装保证，LLM 只负责填语义内容，避免它每次记模板
-记飘。
+Perche' non far produrre all'LLM direttamente il prompt finale: misurato, la prosa inglese libera ha qualita' scadente, la causa e' che non rispetta
+il formato strutturato a campi di H3 (integrated_multimodal_description / retention_analysis
+ecc.). La correttezza del formato e' garantita dall'assemblaggio nel codice, l'LLM compila solo il contenuto semantico, evitando che
+ogni volta ricordi male il template.
 
-设计要点：
-  - 复用 ai_tuner 的 LLM 配置通道（get_config 读 ai_config.json），不引入
-    新 API 配置项。
-  - 单独实现高 temperature 调用：ai_tuner._call_llm 写死 temp=0.3（参数精
-    调求稳），创意扩写需要多样性，故只复用其配置读取与 JSON 容错解析。
-  - 失败一律返回 None，由调用方（/generate）优雅降级为原始 prompt。
-  - 不硬编码任何个人环境：模型名 / 接口地址全部来自用户已保存的 ai_config。
+Punti di progetto:
+  - Riusa il canale di configurazione LLM di ai_tuner (get_config legge ai_config.json), senza introdurre
+    nuove voci di configurazione API.
+  - Implementa a parte una chiamata a temperature alta: ai_tuner._call_llm ha temp=0.3 fissa (la rifinitura dei parametri cerca stabilita'),
+    l'espansione creativa richiede diversita', quindi si riusano solo la lettura della configurazione e l'interpretazione JSON tollerante.
+  - Ogni errore restituisce None, e il chiamante (/generate) degrada con grazia al prompt originale.
+  - Nessun ambiente personale cablato nel codice: nome del modello / indirizzo dell'interfaccia provengono tutti dalla ai_config salvata dall'utente.
 """
 
 import json
@@ -27,87 +27,87 @@ from .ai_tuner import get_config, _parse_llm_response
 from .h3_prompt_format import compose_prompt
 
 
-# H3 turbo 工作流的合理参数区间（编排结果 clamp 到此范围，避免 LLM 乱给）
+# Intervallo ragionevole dei parametri del workflow H3 turbo (il risultato dell'orchestrazione viene limitato a questo intervallo, per evitare valori arbitrari dell'LLM)
 _STEPS_MIN, _STEPS_MAX = 4, 20
 _CFG_MIN, _CFG_MAX = 0.5, 8.0
 
 
-# 通用撰写规则：LLM 只填语义内容，不写最终字段名（字段由代码拼装）
-_COMMON_RULES = """撰写规则（决定成片质量，务必遵守）：
-1. shot1 用英文（H3 对英文响应最好），40-80 词，自然成句不要堆逗号关键词。
-2. shot1 开头先声明风格与景别，如 "Cinematic, live-action, a medium-wide shot frames ..."；
-   风格从用户意图或参考图推断（写实 / 2D-animated / 3D CG / watercolor 等）。
-3. 运镜写成自然英文动作句，含「运动类型 + 幅度 + 速度」三维度，例如：
+# Regole di scrittura comuni: l'LLM compila solo il contenuto semantico, non scrive i nomi dei campi finali (i campi sono assemblati dal codice)
+_COMMON_RULES = """Regole di scrittura (determinano la qualita' del video, da rispettare assolutamente):
+1. shot1 in inglese (H3 risponde meglio all'inglese), 40-80 parole, frasi naturali senza accumulare parole chiave separate da virgole.
+2. shot1 inizia dichiarando stile e inquadratura, es. "Cinematic, live-action, a medium-wide shot frames ...";
+   lo stile si deduce dall'intento dell'utente o dall'immagine di riferimento (realistico / 2D-animated / 3D CG / watercolor ecc.).
+3. Il movimento di camera si scrive come frase d'azione inglese naturale, con le tre dimensioni «tipo di movimento + ampiezza + velocita'», ad esempio:
    "The camera pushes in with small amplitude at slow speed toward ..."。
-   运动类型词表：Zoom In/Out, Push In/Pull Out, Pan Left/Right, Truck Left/Right,
+   Elenco dei tipi di movimento: Zoom In/Out, Push In/Pull Out, Pan Left/Right, Truck Left/Right,
    Tilt Up/Down, Pedestal Up/Down, Arc Shot, Tracking Shot, Static Shot。
-   幅度/速度无意义时可省略（中幅常速默认不写）。
-4. 明确光影氛围（soft morning light / golden hour / moody volumetric lighting）。
-5. soundscape：1-4 句英文，描述画面里能听见的真实声音（环境音 + 物理动作音 +
-   人声），如水声、脚步、风声、布料摩擦。
-6. music：1-2 句英文，描述观众独享的背景配乐（乐器 + 速度 + 情绪）；用户没提
-   配乐或要安静时填 "N/A"。
-7. 保留用户原始意图的所有关键元素，不凭空添加会改变主体的人物或情节。"""
+   Se ampiezza/velocita' non hanno significato si possono omettere (ampiezza media e velocita' normale di default non si scrivono).
+4. Indicare chiaramente luce e atmosfera (soft morning light / golden hour / moody volumetric lighting).
+5. soundscape: 1-4 frasi in inglese, che descrivono i suoni reali udibili nell'immagine (suoni ambientali + suoni di azioni fisiche +
+   voci), come acqua, passi, vento, sfregamento di tessuto.
+6. music: 1-2 frasi in inglese, che descrivono la colonna sonora di sottofondo riservata allo spettatore (strumenti + tempo + emozione); se l'utente non ha parlato di
+   musica o vuole silenzio si scrive "N/A".
+7. Conservare tutti gli elementi chiave dell'intento originale dell'utente, senza aggiungere dal nulla personaggi o trame che cambierebbero il soggetto."""
 
-# R2V 专属：身份锚定是质量关键
+# Specifico R2V: l'ancoraggio dell'identita' e' la chiave della qualita'
 _R2V_RULES = """
 
-这是「参考图生视频」，必须用官方六段式锁人物身份：
-- subjects：为每个主体给稳定 name（如 "Subject 1"）、refs（它出现在哪些参考图，
-  如 ["Picture 1","Picture 2"]）、appearance（具体可见特征：脸型/发型/发饰/服装
-  颜色款式等，越具体越好，不要写"唯美/电影感"这类空标签）。
-- summary：一句话概述整段视频谁在做什么，用 <Subject N> 引用主体。
-- retention：对每个主体列 preserved——明确哪些特征必须保持不变（fully_preserved），
-  这是 H3 锁身份的核心，务必把 subjects 里的关键外观特征复述进来。
-- shot1 里描述动作时也要用 <Subject N> 引用主体，保持身份一致。"""
+Questo e' un «video da immagine di riferimento», bisogna usare le sei sezioni ufficiali per bloccare l'identita' dei personaggi:
+- subjects: per ogni soggetto dare un name stabile (es. "Subject 1"), refs (in quali immagini di riferimento compare,
+  es. ["Picture 1","Picture 2"]), appearance (caratteristiche visibili concrete: forma del viso/acconciatura/accessori per capelli/colore e foggia
+  dei vestiti ecc., piu' e' concreto meglio e', non scrivere etichette vuote come "poetico/cinematografico").
+- summary: una frase che riassume chi fa cosa nell'intero video, citando i soggetti con <Subject N>.
+- retention: per ogni soggetto elencare preserved: indicare chiaramente quali caratteristiche devono restare invariate (fully_preserved),
+  e' il cuore del blocco dell'identita' di H3, bisogna ripetere qui le caratteristiche di aspetto chiave di subjects.
+- Anche quando in shot1 si descrive l'azione bisogna citare i soggetti con <Subject N>, per mantenere l'identita' coerente."""
 
 
-SYSTEM_PROMPT_T2V = """你是一位资深电影摄影师与分镜师，为 MiniMax H3 文生视频模型撰写画面内容。
+SYSTEM_PROMPT_T2V = """Sei un direttore della fotografia e storyboarder esperto, scrivi il contenuto visivo per il modello text-to-video MiniMax H3.
 
-用户会给你一句中文或英文的画面描述。输出一个 JSON 对象：
+L'utente ti dara' una descrizione dell'immagine in una frase, in italiano, cinese o inglese. Produci un oggetto JSON:
 {
-  "shot1": "英文：本镜头的风格声明 + 主体 + 动作 + 场景 + 运镜（三维度自然句）+ 光影",
-  "soundscape": "英文：画面内真实声音",
-  "music": "英文：背景配乐，无则 N/A",
-  "steps": 整数(4-20),
-  "cfg": 小数(0.5-8.0),
-  "reasoning": "中文简述编排思路"
+  "shot1": "Inglese: dichiarazione di stile di questa inquadratura + soggetto + azione + scena + movimento di camera (frase naturale a tre dimensioni) + luce",
+  "soundscape": "Inglese: suoni reali nell'immagine",
+  "music": "Inglese: musica di sottofondo, N/A se assente",
+  "steps": intero(4-20),
+  "cfg": decimale(0.5-8.0),
+  "reasoning": "Breve sintesi in italiano della logica di orchestrazione"
 }
 
 """ + _COMMON_RULES + """
 
-参数规则：steps 写实电影质感 8-12、默认 8；cfg H3 turbo 推荐 1.0 附近，描述很具体
-希望强跟随用 1.5-2.5，默认 1.0。
+Regole sui parametri: steps 8-12 per resa cinematografica realistica, default 8; cfg consigliato per H3 turbo intorno a 1.0, se la descrizione e' molto specifica
+e si vuole un forte rispetto si usa 1.5-2.5, default 1.0.
 
-只输出 JSON，不要任何额外文字或 markdown 之外的内容。"""
+Produci solo il JSON, senza alcun testo aggiuntivo ne' contenuto al di fuori di markdown."""
 
 
-SYSTEM_PROMPT_R2V = """你是一位资深电影摄影师与分镜师，为 MiniMax H3 参考图生视频（Ref2VA）撰写内容。
+SYSTEM_PROMPT_R2V = """Sei un direttore della fotografia e storyboarder esperto, scrivi il contenuto per il reference-to-video (Ref2VA) di MiniMax H3.
 
-用户会给你一句画面描述（画面里的人物/主体已由参考图提供）。输出一个 JSON 对象：
+L'utente ti dara' una descrizione dell'immagine (personaggi/soggetti dell'immagine sono gia' forniti dalle immagini di riferimento). Produci un oggetto JSON:
 {
-  "subjects": [{"name": "Subject 1", "refs": ["Picture 1","Picture 2"], "appearance": "英文具体外观特征"}],
-  "summary": "英文：一句话概述整段视频谁在做什么，用 <Subject N> 引用",
-  "retention": [{"name": "Subject 1", "preserved": "英文：必须保持不变的具体特征"}],
-  "shot1": "英文：风格声明 + 用 <Subject N> 描述动作 + 场景 + 运镜（三维度）+ 光影",
-  "soundscape": "英文：画面内真实声音",
-  "music": "英文：背景配乐，无则 N/A",
-  "steps": 整数(4-20),
-  "cfg": 小数(0.5-8.0),
-  "reasoning": "中文简述编排思路"
+  "subjects": [{"name": "Subject 1", "refs": ["Picture 1","Picture 2"], "appearance": "caratteristiche concrete dell'aspetto in inglese"}],
+  "summary": "Inglese: una frase che riassume chi fa cosa nell'intero video, citando con <Subject N>",
+  "retention": [{"name": "Subject 1", "preserved": "Inglese: caratteristiche concrete che devono restare invariate"}],
+  "shot1": "Inglese: dichiarazione di stile + azione descritta con <Subject N> + scena + movimento di camera (tre dimensioni) + luce",
+  "soundscape": "Inglese: suoni reali nell'immagine",
+  "music": "Inglese: musica di sottofondo, N/A se assente",
+  "steps": intero(4-20),
+  "cfg": decimale(0.5-8.0),
+  "reasoning": "Breve sintesi in italiano della logica di orchestrazione"
 }
 
 """ + _COMMON_RULES + _R2V_RULES + """
 
-参数规则：steps 默认 8；cfg 默认 1.0。
+Regole sui parametri: steps default 8; cfg default 1.0.
 
-只输出 JSON，不要任何额外文字。"""
+Produci solo il JSON, senza alcun testo aggiuntivo."""
 
 
 def _call_llm_creative(cfg: Dict[str, Any], messages: list,
                        temperature: float = 0.85,
                        max_tokens: int = 1024) -> Optional[str]:
-    """高 temperature 的 OpenAI 兼容调用（创意扩写用，区别于调优的低温调用）。"""
+    """Chiamata compatibile OpenAI a temperature alta (per l'espansione creativa, diversa dalla chiamata a bassa temperatura del tuning)."""
     url = cfg.get("api_url", "").rstrip("/")
     if not url.endswith("/chat/completions"):
         if "/v1" in url:
@@ -148,20 +148,20 @@ def _clamp(value: Any, lo: float, hi: float, default: float) -> float:
 
 def enhance_prompt(user_prompt: str, mode: str = "t2v",
                    picture_count: int = 1) -> Optional[Dict[str, Any]]:
-    """把用户粗略描述编排成 H3 官方结构化 prompt + 推荐参数。
+    """Orchestra la descrizione grezza dell'utente in un prompt strutturato ufficiale H3 + parametri consigliati.
 
-    mode: t2v / i2v / r2v。r2v 走六段式（含身份锚定），其余走三核心字段。
-    picture_count: 参考图/首帧图数量（r2v 用于给 subjects 分配 Picture 标签）。
+    mode: t2v / i2v / r2v. r2v usa le sei sezioni (con ancoraggio dell'identita'), gli altri usano i tre campi principali.
+    picture_count: numero di immagini di riferimento / primo fotogramma (r2v lo usa per assegnare le etichette Picture ai subjects).
 
-    成功返回 {"prompt"(已拼装成官方格式), "steps", "cfg", "reasoning"}；
-    未配置 LLM / 调用失败 / 解析失败 一律返回 None（调用方降级用原 prompt）。
+    In caso di successo restituisce {"prompt" (gia' assemblato nel formato ufficiale), "steps", "cfg", "reasoning"};
+    LLM non configurato / chiamata fallita / interpretazione fallita restituiscono sempre None (il chiamante ripiega sul prompt originale).
     """
     if not user_prompt or not user_prompt.strip():
         return None
 
     cfg = get_config()
     if not cfg.get("api_url") or not cfg.get("model_name"):
-        # 用户还没配 LLM，无法编排，交回原样
+        # L'utente non ha ancora configurato un LLM, impossibile orchestrare, si restituisce l'originale
         return None
 
     sys_prompt = SYSTEM_PROMPT_R2V if mode == "r2v" else SYSTEM_PROMPT_T2V
@@ -175,7 +175,7 @@ def enhance_prompt(user_prompt: str, mode: str = "t2v",
     if not parsed or not parsed.get("shot1"):
         return None
 
-    # 按官方模板拼装成最终 prompt（格式正确性由代码保证）
+    # Assembla il prompt finale secondo il template ufficiale (la correttezza del formato e' garantita dal codice)
     final = compose_prompt(parsed, mode=mode, picture_count=picture_count)
     if not final.strip():
         return None

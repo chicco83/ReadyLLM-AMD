@@ -1,10 +1,10 @@
-"""模型下载服务
+"""Servizio di download dei modelli
 
-在目标机上后台下载 GGUF 模型到其 models_dir，支持断点续传。
-下载为耗时操作，采用后台线程执行 + 轮询已落盘字节计算进度。
+Scarica in background sulla macchina target i modelli GGUF nella sua models_dir, con ripresa del download.
+Il download e' un'operazione lunga: si usa un thread in background + polling dei byte scritti su disco per calcolare l'avanzamento.
 
-跨平台：
-  - Windows：curl.exe（Win10 1803+ 自带）断点续传
+Multipiattaforma:
+  - Windows: curl.exe (incluso da Win10 1803+) con ripresa del download
   - macOS / Linux：curl -C -
 """
 
@@ -17,13 +17,13 @@ from .executor import Executor
 from .model_catalog import ModelEntry, get_by_id
 from ..models.target import Target, get_target
 
-# 任务表：job_id -> {...}
+# Tabella dei task: job_id -> {...}
 _JOBS: dict = {}
 _LOCK = threading.Lock()
 
 
 def _file_size(executor: Executor, target: Target, path: str) -> int:
-    """查询目标机上文件当前字节数，不存在返回 0"""
+    """Interroga i byte attuali di un file sulla macchina target, se non esiste restituisce 0"""
     if target.os == "windows":
         cmd = (f'powershell -Command "if(Test-Path \'{path}\')'
                f'{(chr(123))}(Get-Item \'{path}\').Length{(chr(125))}else{{0}}"')
@@ -36,7 +36,7 @@ def _file_size(executor: Executor, target: Target, path: str) -> int:
 
 
 def _remote_total_size(executor: Executor, url: str) -> int:
-    """通过 HEAD 请求获取远端文件总大小（在目标机执行，走目标机网络）"""
+    """Ottiene la dimensione totale del file remoto con una richiesta HEAD (eseguita sulla macchina target, usa la rete della macchina target)"""
     cmd = f'curl -sIL --max-time 20 "{url}" | grep -i content-length | tail -1'
     result = executor.run(cmd, timeout=25)
     digits = "".join(c for c in result.stdout if c.isdigit())
@@ -67,22 +67,22 @@ def list_jobs() -> List[dict]:
 
 
 def start_download(target_id: str, model_id: str, source: str = "hf-mirror") -> dict:
-    """启动下载任务，返回 {ok, job_id} 或 {ok:False, message}
-    source: huggingface | hf-mirror | modelscope（魔搭无对应仓库自动回退镜像站）"""
+    """Avvia il task di download, restituisce {ok, job_id} o {ok:False, message}
+    source: huggingface | hf-mirror | modelscope (se ModelScope non ha il repository corrispondente ripiega automaticamente sul mirror)"""
     target = get_target(target_id)
     if not target:
-        return {"ok": False, "message": "目标机器不存在"}
+        return {"ok": False, "message": "Macchina target inesistente"}
     if not target.models_dir:
-        return {"ok": False, "message": "目标机器未配置模型目录"}
+        return {"ok": False, "message": "La macchina target non ha una cartella dei modelli configurata"}
     entry = get_by_id(model_id)
     if not entry:
-        return {"ok": False, "message": "模型不存在于目录"}
+        return {"ok": False, "message": "Il modello non esiste nel catalogo"}
 
     url, used_source = entry.resolve(source)
     from .collectors import path_join
     dest = path_join(target, target.models_dir, entry.filename)
 
-    # 同一目标机同文件正在下载则复用
+    # Se lo stesso file e' gia' in download sulla stessa macchina target lo si riusa
     with _LOCK:
         for j in _JOBS.values():
             if j["target_id"] == target_id and j["dest"] == dest and j["status"] == "downloading":
@@ -108,18 +108,18 @@ def start_download(target_id: str, model_id: str, source: str = "hf-mirror") -> 
         try:
             from .executor import make_executor
             executor = make_executor(target)
-            _append_log(job_id, f"开始下载 {entry.name} {entry.quant} → {dest}")
+            _append_log(job_id, f"Avvio download di {entry.name} {entry.quant} → {dest}")
 
             total = _remote_total_size(executor, url)
             if total == 0 and entry.size_gb:
-                # HEAD 拿不到（网络/重定向限制）时，回退用目录预估大小
+                # Se HEAD non e' ottenibile (limiti di rete/reindirizzamento), ripiega sulla dimensione stimata del catalogo
                 total = int(entry.size_gb * 1024 * 1024 * 1024)
-                _append_log(job_id, "无法获取精确大小，使用预估大小计算进度")
+                _append_log(job_id, "Impossibile ottenere la dimensione esatta, uso la dimensione stimata per calcolare l'avanzamento")
             with _LOCK:
                 _JOBS[job_id]["total"] = total
-            _append_log(job_id, f"文件总大小: {round(total/1024/1024,1) if total else '未知'} MB")
+            _append_log(job_id, f"Dimensione totale del file: {round(total/1024/1024,1) if total else 'sconosciuta'} MB")
 
-            # 下载到 .part 临时文件，完成后重命名，避免未完成文件被误判为已下载
+            # Scarica in un file temporaneo .part e a fine download lo rinomina, evitando che un file incompleto sia scambiato per scaricato
             part_path = dest + ".part"
             if target.os == "windows":
                 dl_cmd = (f'curl.exe -L -C - --retry 3 --retry-delay 2 '
@@ -128,8 +128,8 @@ def start_download(target_id: str, model_id: str, source: str = "hf-mirror") -> 
                 dl_cmd = (f'curl -L -C - --retry 3 --retry-delay 2 '
                           f'-o "{part_path}" "{url}"')
 
-            # 后台执行下载（不阻塞等待），随后轮询进度
-            _append_log(job_id, "发起下载请求（断点续传）...")
+            # Esegue il download in background (senza attendere bloccando), poi fa polling dell'avanzamento
+            _append_log(job_id, "Invio della richiesta di download (con ripresa)...")
             result = executor.run(dl_cmd, timeout=7200)
 
             final_size = _file_size(executor, target, part_path)
@@ -138,7 +138,7 @@ def start_download(target_id: str, model_id: str, source: str = "hf-mirror") -> 
                 job["downloaded"] = final_size
 
             if result.ok and (total == 0 or final_size >= total):
-                # 下载完成：重命名 .part → 最终文件名
+                # Download completato: rinomina .part → nome finale del file
                 if target.os == "windows":
                     mv_cmd = f'move /Y "{part_path}" "{dest}"'
                 else:
@@ -147,24 +147,24 @@ def start_download(target_id: str, model_id: str, source: str = "hf-mirror") -> 
                 if mv_result.ok:
                     with _LOCK:
                         _JOBS[job_id]["status"] = "success"
-                    _append_log(job_id, "✓ 下载完成")
+                    _append_log(job_id, "✓ Download completato")
                 else:
                     with _LOCK:
                         _JOBS[job_id]["status"] = "failed"
-                        _JOBS[job_id]["error"] = "文件重命名失败: " + (mv_result.stderr or "")
-                    _append_log(job_id, f"✗ 重命名失败: {mv_result.stderr}")
+                        _JOBS[job_id]["error"] = "Rinomina del file non riuscita: " + (mv_result.stderr or "")
+                    _append_log(job_id, f"✗ Rinomina non riuscita: {mv_result.stderr}")
             else:
                 with _LOCK:
                     job = _JOBS[job_id]
                     job["status"] = "failed"
-                    job["error"] = result.stderr or "下载未完成"
-                _append_log(job_id, f"✗ 下载失败: {result.stderr}")
+                    job["error"] = result.stderr or "Download non completato"
+                _append_log(job_id, f"✗ Download non riuscito: {result.stderr}")
         except Exception as e:
             with _LOCK:
                 job = _JOBS[job_id]
                 job["status"] = "failed"
                 job["error"] = str(e)
-            _append_log(job_id, f"✗ 异常: {e}")
+            _append_log(job_id, f"✗ Eccezione: {e}")
         finally:
             if executor:
                 executor.close()
@@ -174,7 +174,7 @@ def start_download(target_id: str, model_id: str, source: str = "hf-mirror") -> 
 
 
 def query_progress(job_id: str) -> Optional[dict]:
-    """查询进度：对 downloading 中的任务，实时读取目标机 .part 文件字节数"""
+    """Interroga l'avanzamento: per i task in downloading, legge in tempo reale i byte del file .part sulla macchina target"""
     job = get_job(job_id)
     if not job:
         return None
@@ -183,7 +183,7 @@ def query_progress(job_id: str) -> Optional[dict]:
         if target:
             executor = make_executor_cached(target)
             try:
-                # 下载中文件在 .part 路径
+                # Il file in download si trova al percorso .part
                 part_path = job["dest"] + ".part"
                 size = _file_size(executor, target, part_path)
                 with _LOCK:
@@ -195,6 +195,6 @@ def query_progress(job_id: str) -> Optional[dict]:
 
 
 def make_executor_cached(target: Target):
-    """每次新建执行器（SSH 连接开销可接受，避免跨线程共享 paramiko client）"""
+    """Crea ogni volta un nuovo esecutore (il costo della connessione SSH e' accettabile, evita di condividere il client paramiko tra thread)"""
     from .executor import make_executor
     return make_executor(target)

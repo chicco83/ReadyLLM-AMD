@@ -1,19 +1,19 @@
-"""智能调优压测服务（两阶段搜索版）
+"""Servizio di tuning con test di carico (versione di ricerca in due fasi)
 
-在用户当前硬件配置下，为目标机上的某个模型搜索最优推理参数。
+Nella configurazione hardware attuale dell'utente, cerca i parametri di inferenza ottimali per un modello sulla macchina target.
 
-设计要点：
-  1. 参数分三类：
-     - 约束类（用户/硬件定死）：模型、端口、ctx 下限 → 不搜，作硬约束
-     - 离散高影响类：spec-type / cache-type-k,v / n-gpu-layers → coarse 阶段搜
-     - 连续微调类：batch-size / ubatch-size / spec-draft-n-max → fine 阶段坐标下降
-  2. 显存可行性预检：估算权重+KV+cache 占用，放不下的组合直接跳过，不浪费启动时间
-  3. 两阶段搜索：coarse 定主导因素 → fine 在最优组合附近收敛
-  4. 可信测速：warmup + 正式 3 次取中位数，记录解码/预填充/TTFT/GPU 利用率
-  5. 基线对比：以用户原始参数为 baseline 先测，输出"推荐 vs 当前"
+Punti di progetto:
+  1. I parametri sono di tre tipi:
+     - Vincoli (fissati da utente/hardware): modello, porta, minimo di ctx -> non si cercano, sono vincoli rigidi
+     - Discreti ad alto impatto: spec-type / cache-type-k,v / n-gpu-layers -> cercati nella fase coarse
+     - Continui di rifinitura: batch-size / ubatch-size / spec-draft-n-max -> discesa per coordinate nella fase fine
+  2. Pre-verifica di fattibilita' della VRAM: stima pesi+KV+cache, le combinazioni che non ci stanno vengono saltate subito, senza sprecare tempo di avvio
+  3. Ricerca in due fasi: coarse individua il fattore dominante, fine converge attorno alla combinazione migliore
+  4. Misure affidabili: warmup + 3 prove ufficiali con mediana, registrando decodifica/prefill/TTFT/utilizzo GPU
+  5. Confronto con la baseline: si misura per prima la configurazione originale dell'utente come baseline, e si produce "consigliata vs attuale"
 
-优化目标可选：latency(端到端体感,默认) / throughput(纯解码吞吐) / prefill(长文本预填充)。
-无引擎/无模型时明确报错，绝不返回模拟数据。
+Obiettivo di ottimizzazione a scelta: latency (percezione end-to-end, default) / throughput (pura velocita' di decodifica) / prefill (prefill di testi lunghi).
+Senza motore/senza modello restituisce un errore esplicito, mai dati simulati.
 """
 
 import threading
@@ -31,71 +31,71 @@ from ..models.target import Target, get_target
 _JOBS: dict = {}
 _LOCK = threading.Lock()
 
-# 基准测试 prompt（固定，保证各组可比）
-_BENCH_PROMPT = "请用一句话解释什么是大语言模型。"
-# 长 prompt：约 2000+ tokens，足以触发多轮 batch 拆分，测出预填充真实瓶颈
+# Prompt del benchmark (fisso, garantisce la confrontabilita' tra i gruppi)
+_BENCH_PROMPT = "Spiega in una frase che cos'e' un modello linguistico di grandi dimensioni."
+# Prompt lungo: circa 2000+ token, sufficiente a innescare piu' suddivisioni di batch e a misurare il vero collo di bottiglia del prefill
 _BENCH_LONG_PROMPT = (
-    "Transformer架构是现代大语言模型的基础。其核心组件包括多头自注意力机制、"
-    "位置编码、前馈神经网络和层归一化。自注意力机制允许模型在处理每个词时关注"
-    "输入序列中的所有其他位置，从而捕获长距离依赖关系。多头注意力将表示空间投影"
-    "到多个子空间中并行计算注意力，增强了模型的表达能力。位置编码使用正弦和余弦"
-    "函数为序列中的每个位置生成唯一的向量表示，使模型能够感知词的顺序信息。"
-    "前馈网络对每个位置独立应用两层全连接变换，引入非线性特征提取能力。"
-    "层归一化和残差连接则确保深层网络的训练稳定性。在推理阶段，KV缓存机制"
-    "避免了重复计算已处理位置的键值对，显著提升了自回归生成的效率。"
-    "投机解码技术通过小型草稿模型预测多个候选token，再由大模型并行验证，"
-    "从而在不损失质量的前提下加速生成过程。量化技术通过降低权重和激活值的"
-    "数值精度来减少显存占用和计算量，使得更大的模型能够在消费级硬件上运行。"
-    "常见的量化方案包括GPTQ、AWQ、GGML格式的各种量化级别如Q4_0、Q4_K_M、"
-    "Q5_K_M、Q8_0等，它们在精度损失和压缩率之间提供了不同的权衡选择。"
-    "Flash Attention算法通过分块计算和在线softmax技巧，将注意力计算的显存复杂度"
-    "从二次方降低到线性，使得处理超长上下文成为可能。PagedAttention则将KV缓存"
-    "组织成类似操作系统虚拟内存的页表结构，支持高效的显存管理和多请求并发。"
-    "在部署层面，模型并行策略包括张量并行、流水线并行和序列并行，分别适用于"
-    "不同的硬件拓扑和模型规模。推理引擎如llama.cpp、vLLM、TensorRT-LLM等"
-    "各自针对不同的硬件平台和优化目标进行了深度优化。连续批处理技术允许动态"
-    "地将新请求插入正在处理的批次中，提高了GPU的利用率和系统吞吐量。"
-    "推测性解码的变体包括Medusa、EAGLE和Lookahead Decoding，它们通过不同的"
-    "草稿生成策略在速度和质量之间取得平衡。模型蒸馏和剪枝技术则从模型结构层面"
-    "减少计算需求，知识蒸馏让小模型学习大模型的输出分布，结构化剪枝移除冗余的"
-    "注意力头和神经元。混合专家模型通过门控网络将输入路由到少数专家子网络，"
-    "在保持参数量的同时大幅降低每次前向传播的计算量。这些技术的组合使用使得"
-    "在单张消费级显卡上部署数十亿参数的模型成为现实，为本地化AI应用奠定了基础。"
+    "L'architettura Transformer e' alla base dei moderni modelli linguistici di grandi dimensioni. I suoi componenti principali comprendono il meccanismo di auto-attenzione multi-testa, "
+    "la codifica posizionale, la rete neurale feed-forward e la normalizzazione degli strati. Il meccanismo di auto-attenzione permette al modello, nell'elaborare ogni parola, di prestare attenzione a "
+    "tutte le altre posizioni della sequenza di input, catturando cosi' le dipendenze a lungo raggio. L'attenzione multi-testa proietta lo spazio di rappresentazione "
+    "in piu' sottospazi calcolando l'attenzione in parallelo, aumentando la capacita' espressiva del modello. La codifica posizionale usa funzioni seno e coseno "
+    "per generare una rappresentazione vettoriale unica per ogni posizione della sequenza, permettendo al modello di percepire l'ordine delle parole. "
+    "La rete feed-forward applica a ogni posizione, in modo indipendente, due trasformazioni completamente connesse, introducendo la capacita' di estrarre caratteristiche non lineari. "
+    "La normalizzazione degli strati e le connessioni residue garantiscono la stabilita' dell'addestramento delle reti profonde. In fase di inferenza, il meccanismo della cache KV "
+    "evita di ricalcolare le coppie chiave-valore delle posizioni gia' elaborate, migliorando in modo significativo l'efficienza della generazione autoregressiva. "
+    "La tecnica della decodifica speculativa fa predire a un piccolo modello bozza piu' token candidati, che il modello grande verifica poi in parallelo, "
+    "accelerando la generazione senza perdere qualita'. Le tecniche di quantizzazione riducono l'occupazione di VRAM e il carico di calcolo abbassando la "
+    "precisione numerica di pesi e attivazioni, permettendo a modelli piu' grandi di girare su hardware consumer. "
+    "Gli schemi di quantizzazione piu' comuni comprendono GPTQ, AWQ e i vari livelli di quantizzazione del formato GGML come Q4_0, Q4_K_M, "
+    "Q5_K_M, Q8_0 ecc., che offrono compromessi diversi tra perdita di precisione e tasso di compressione. "
+    "L'algoritmo Flash Attention, con il calcolo a blocchi e il trucco del softmax online, riduce la complessita' di VRAM dell'attenzione "
+    "da quadratica a lineare, rendendo possibile elaborare contesti molto lunghi. PagedAttention organizza invece la cache KV "
+    "in una struttura a tabelle di pagine simile alla memoria virtuale dei sistemi operativi, supportando una gestione efficiente della VRAM e la concorrenza di piu' richieste. "
+    "A livello di deploy, le strategie di parallelismo del modello comprendono il parallelismo tensoriale, a pipeline e di sequenza, adatte rispettivamente a "
+    "topologie hardware e dimensioni di modello diverse. I motori di inferenza come llama.cpp, vLLM, TensorRT-LLM ecc. "
+    "sono stati ottimizzati in profondita' ciascuno per piattaforme hardware e obiettivi diversi. Il continuous batching permette di inserire dinamicamente "
+    "nuove richieste nel batch in corso di elaborazione, aumentando l'utilizzo della GPU e il throughput del sistema. "
+    "Le varianti della decodifica speculativa comprendono Medusa, EAGLE e Lookahead Decoding, che con strategie diverse di "
+    "generazione della bozza trovano un equilibrio tra velocita' e qualita'. Le tecniche di distillazione e potatura del modello riducono invece "
+    "il fabbisogno di calcolo dal lato della struttura del modello: la distillazione della conoscenza fa imparare a un modello piccolo la distribuzione di output di uno grande, la potatura strutturata rimuove le "
+    "teste di attenzione e i neuroni ridondanti. I modelli a miscela di esperti instradano l'input verso pochi sotto-reti esperte tramite una rete di gating, "
+    "riducendo molto il calcolo di ogni passaggio in avanti pur mantenendo il numero di parametri. L'uso combinato di queste tecniche rende possibile "
+    "distribuire su una singola scheda grafica consumer modelli con miliardi di parametri, ponendo le basi per le applicazioni di IA locali. "
 ) * 6  # ×6 ≈ 2400+ tokens
 _BENCH_MAX_TOKENS = 128
-_BENCH_REPEATS = 3  # 正式测速重复次数，取中位数
+_BENCH_REPEATS = 3  # numero di ripetizioni della misura ufficiale, si prende la mediana
 
-# ==================== 参数分层 ====================
+# ==================== Stratificazione dei parametri ====================
 
-# 离散高影响参数：coarse 阶段搜索
-SPEC_OPTIONS = ["off", "draft-mtp"]           # 投机解码方式
-CACHE_OPTIONS = ["f16", "q8_0", "q4_0"]       # KV cache 量化（越省显存越大 ctx）
-NGL_OPTIONS = ["all", "0"]                    # GPU 卸载层数（all 全进 GPU；0 全 CPU 兜底）
+# Parametri discreti ad alto impatto: cercati nella fase coarse
+SPEC_OPTIONS = ["off", "draft-mtp"]           # modalita' di decodifica speculativa
+CACHE_OPTIONS = ["f16", "q8_0", "q4_0"]       # quantizzazione della KV cache (piu' risparmia VRAM, piu' ctx grande)
+NGL_OPTIONS = ["all", "0"]                    # strati scaricati sulla GPU (all = tutti in GPU; 0 = tutto su CPU come ripiego)
 
-# 连续微调参数：fine 阶段坐标下降
+# Parametri continui di rifinitura: discesa per coordinate nella fase fine
 CONTINUOUS_GRID = {
     "batch-size": [1024, 2048, 4096, 8192],
     "ubatch-size": [128, 256, 512, 1024],
-    "threads": [16, 24, 32],            # CPU 线程，影响预填充与 CPU 端协同
-    "spec-draft-n-max": [2, 3, 4, 5],   # 投机一次预测多少 token
-    "spec-draft-n-min": [1, 2, 3],      # 投机最少接受阈值，影响投机效率
+    "threads": [16, 24, 32],            # thread CPU, influiscono su prefill e cooperazione lato CPU
+    "spec-draft-n-max": [2, 3, 4, 5],   # quanti token predice la speculazione in una volta
+    "spec-draft-n-min": [1, 2, 3],      # soglia minima di accettazione della speculazione, influisce sull'efficienza speculativa
 }
 
-# 目标可选评分权重：(解码速度, 预填充速度, TTFT)
+# Pesi di punteggio per obiettivo: (velocita' di decodifica, velocita' di prefill, TTFT)
 GOAL_WEIGHTS = {
     "latency":    {"decode": 0.5, "prefill": 0.3, "ttft": 0.2},
     "throughput": {"decode": 1.0, "prefill": 0.0, "ttft": 0.0},
     "prefill":    {"decode": 0.2, "prefill": 0.8, "ttft": 0.0},
 }
 GOAL_LABELS = {
-    "latency": "端到端体感",
-    "throughput": "解码吞吐",
-    "prefill": "长文本预填充",
+    "latency": "Percezione end-to-end",
+    "throughput": "Throughput di decodifica",
+    "prefill": "Prefill di testi lunghi",
 }
 
 
 def _normalize_cfg(spec_type, cache_type, ngl, batch, ubatch, draft_n_max) -> dict:
-    """一个完整配置 = 离散主导因素 + 连续微调参数"""
+    """Una configurazione completa = fattori dominanti discreti + parametri continui di rifinitura"""
     cfg = {
         "spec-type": spec_type,
         "cache-type-k": cache_type,
@@ -116,19 +116,19 @@ def _cfg_label(cfg: dict) -> str:
 
 
 def _args_list(cfg: dict, target: Target, ctx_size: int) -> List[str]:
-    """把配置 dict 转成 llama-server 命令行参数列表（含固定项与 ctx）"""
+    """Converte il dict di configurazione nell'elenco di parametri da riga di comando di llama-server (con voci fisse e ctx)"""
     args = []
     for k, v in cfg.items():
         if k == "n-gpu-layers":
-            # llama-server 同时认 --n-gpu-layers 与 --gpu-layers，用标准名
+            # llama-server riconosce sia --n-gpu-layers sia --gpu-layers, si usa il nome standard
             args += ["--n-gpu-layers", str(v)]
         else:
             args += [f"--{k}", str(v)]
     args += [
         "--ctx-size", str(ctx_size),
         "--flash-attn", "on",
-        # 关键：必须显式关闭 fit。fit 默认 on，会"自作主张"下调我们设的 batch/ubatch
-        # 以塞进它认为安全的显存余量，导致搜索时实际生效参数 ≠ 我们测的参数，结果失真。
+        # Punto chiave: fit va disattivato esplicitamente. fit e' on di default e «di testa sua» abbassa batch/ubatch impostati da noi
+        # per far stare tutto nel margine di VRAM che ritiene sicuro, per cui i parametri realmente attivi durante la ricerca != quelli che misuriamo e il risultato e' falsato.
         "--fit", "off",
         "--metrics",
         "--host", "0.0.0.0",
@@ -137,39 +137,39 @@ def _args_list(cfg: dict, target: Target, ctx_size: int) -> List[str]:
     return args
 
 
-# ==================== 显存可行性预检 ====================
+# ==================== Pre-verifica di fattibilita' della VRAM ====================
 
-# KV cache 量化每元素字节数
+# Byte per elemento della quantizzazione della KV cache
 _CACHE_BYTES = {"f16": 2.0, "q8_0": 1.0, "q4_0": 0.5}
 
 
 def _estimate_vram_gb(model_size_gb: float, ctx_size: int,
                       cache_type: str, kv_heads_dim: int = 8192) -> float:
-    """粗估显存占用 GB：权重 + KV cache。
-    kv_heads_dim 为 KV 维度近似（hidden*n_heads 量级），27B 级约 8192。
-    权重全进 GPU（n-gpu-layers=all 场景）；CPU 兜底场景由调用方单独处理。
+    """Stima approssimativa dell'occupazione di VRAM in GB: pesi + KV cache.
+    kv_heads_dim e' un'approssimazione della dimensione KV (ordine di grandezza hidden*n_heads), circa 8192 per la classe 27B.
+    Pesi tutti in GPU (scenario n-gpu-layers=all); lo scenario di ripiego su CPU e' gestito a parte dal chiamante.
     """
-    # KV cache: 2(K+V) * ctx * kv_dim * bytes * 层数比例近似
-    # 简化：ctx * kv_dim * cache_bytes * 2 / 1e9，再乘层数经验系数
+    # KV cache: 2(K+V) * ctx * kv_dim * bytes * approssimazione in proporzione al numero di strati
+    # Semplificazione: ctx * kv_dim * cache_bytes * 2 / 1e9, poi moltiplicato per un coefficiente empirico sul numero di strati
     kv_bytes = 2 * ctx_size * kv_heads_dim * _CACHE_BYTES.get(cache_type, 2.0)
-    # 27B 约 64 层，每层都有 KV；上面 2* 已含 K/V，这里再乘层数
+    # 27B ha circa 64 strati, ognuno con KV; il 2* sopra include gia' K/V, qui si moltiplica ancora per gli strati
     kv_gb = kv_bytes * 64 / (1024 ** 3)
     return model_size_gb + kv_gb
 
 
 def _fits_vram(cfg: dict, model_size_gb: float, ctx_size: int, gpu_vram_gb: float) -> bool:
-    """判断配置是否放得进显存；n-gpu-layers=0 视为 CPU 兜底，总能'放下'（慢）"""
+    """Stabilisce se la configurazione ci sta in VRAM; n-gpu-layers=0 e' un ripiego su CPU e «ci sta» sempre (lento)"""
     if cfg.get("n-gpu-layers") == "0":
         return True
     est = _estimate_vram_gb(model_size_gb, ctx_size, cfg.get("cache-type-k", "f16"))
-    # 留 10% 余量给激活值/显存碎片
+    # Lascia il 10% di margine per attivazioni/frammentazione della VRAM
     return est <= gpu_vram_gb * 0.9
 
 
-# ==================== 测速 ====================
+# ==================== Misura della velocita' ====================
 
 def _wait_ready(executor: Executor, target: Target, timeout: int = 120) -> bool:
-    """轮询目标机 /health 直到服务就绪"""
+    """Fa polling su /health della macchina target finche' il servizio e' pronto"""
     deadline = time.time() + timeout
     cmd = (f'curl -s -o /dev/null -w "%{{http_code}}" --max-time 3 '
            f'http://127.0.0.1:{target.service_port}/health')
@@ -182,17 +182,17 @@ def _wait_ready(executor: Executor, target: Target, timeout: int = 120) -> bool:
 
 
 def _curl_completion(executor: Executor, target: Target, payload: dict) -> Optional[dict]:
-    """向目标机 llama-server 发一次 completion，返回解析后的 JSON 或 None。
+    """Invia un completion al llama-server della macchina target, restituisce il JSON interpretato o None.
 
-    请求体统一走「write_file 落原始 UTF-8 JSON 到临时文件 + curl @file」：
-    长 prompt 的 JSON 可达数十 KB，base64 内嵌进命令行会超 Windows cmd.exe
-    8191 字符上限被截断（导致读到旧文件、测速失真），SFTP/本地写文件不受此限。
+    Il corpo della richiesta passa sempre per «write_file scrive JSON UTF-8 grezzo in un file temporaneo + curl @file»:
+    il JSON di un prompt lungo puo' arrivare a decine di KB e incorporarlo in base64 nella riga di comando supererebbe il limite di
+    8191 caratteri di Windows cmd.exe venendo troncato (leggendo un file vecchio, misure falsate), mentre SFTP/scrittura locale non hanno questo limite.
     """
     body = json.dumps(payload)
     url = f"http://127.0.0.1:{target.service_port}/completion"
     if target.os == "windows":
         json_path = "C:/temp/bench.json"
-        # 先确保目录存在（短命令，不受长度限制）
+        # Prima si assicura che la cartella esista (comando breve, senza limite di lunghezza)
         executor.run(
             'powershell -Command "New-Item -ItemType Directory -Force -Path C:\\temp | Out-Null"',
             timeout=15,
@@ -217,7 +217,7 @@ def _curl_completion(executor: Executor, target: Target, payload: dict) -> Optio
 
 
 def _gpu_snapshot(executor: Executor, target: Target) -> dict:
-    """测速瞬间抓一次 GPU 利用率/显存占用"""
+    """Al momento della misura rileva una volta utilizzo GPU / occupazione VRAM"""
     try:
         from .collectors import _collect_gpu
         return _collect_gpu(executor, target) or {}
@@ -226,7 +226,7 @@ def _gpu_snapshot(executor: Executor, target: Target) -> dict:
 
 
 def _cpu_mem_snapshot(executor: Executor, target: Target) -> dict:
-    """测速瞬间抓一次 CPU 利用率/内存占用"""
+    """Al momento della misura rileva una volta utilizzo CPU / occupazione memoria"""
     try:
         from .collectors import _collect_cpu_mem
         return _collect_cpu_mem(executor, target) or {}
@@ -235,9 +235,9 @@ def _cpu_mem_snapshot(executor: Executor, target: Target) -> dict:
 
 
 def _bench_once(executor: Executor, target: Target, ctx_size: int) -> dict:
-    """单次完整测速：短 prompt 测解码+TTFT，长 prompt 测预填充。
-    返回 {decode, prefill, ttft_ms, gpu_util, gpu_mem_pct}。"""
-    # 短 prompt：解码速度 + TTFT
+    """Una misura completa: prompt corto per misurare decodifica+TTFT, prompt lungo per misurare il prefill.
+    Restituisce {decode, prefill, ttft_ms, gpu_util, gpu_mem_pct}."""
+    # Prompt corto: velocita' di decodifica + TTFT
     short = _curl_completion(executor, target, {
         "prompt": _BENCH_PROMPT,
         "n_predict": _BENCH_MAX_TOKENS,
@@ -249,12 +249,12 @@ def _bench_once(executor: Executor, target: Target, ctx_size: int) -> dict:
     if short:
         tm = short.get("timings", {})
         decode = float(tm.get("predicted_per_second", 0) or 0)
-        # TTFT 近似 = 首 token 生成耗时：用 prompt 处理时间代表
+        # TTFT approssimato = tempo di generazione del primo token: rappresentato dal tempo di elaborazione del prompt
         ttft_ms = float(tm.get("prompt_ms", 0) or 0)
 
-    # 长 prompt：预填充速度
-    # 加唯一随机前缀：llama 的 prefix cache 从序列头部匹配，前缀一变整段 cache 不命中，
-    # 否则 warmup + 3 次重复发同一 prompt 时，第 2 次起 prompt_n 骤降、prefill 虚高成 ~40
+    # Prompt lungo: velocita' di prefill
+    # Si aggiunge un prefisso casuale univoco: la prefix cache di llama confronta dall'inizio della sequenza, se il prefisso cambia l'intera cache non fa hit,
+    # altrimenti con warmup + 3 ripetizioni dello stesso prompt dalla 2a in poi prompt_n crolla e il prefill appare gonfiato a ~40
     import uuid as _uuid
     long = _curl_completion(executor, target, {
         "prompt": f"[{_uuid.uuid4().hex[:16]}] " + _BENCH_LONG_PROMPT,
@@ -283,8 +283,8 @@ def _bench_once(executor: Executor, target: Target, ctx_size: int) -> dict:
 
 
 def _bench_median(executor: Executor, target: Target, ctx_size: int) -> dict:
-    """warmup 1 次 + 正式 _BENCH_REPEATS 次，各指标取中位数"""
-    _bench_once(executor, target, ctx_size)  # warmup，丢弃
+    """1 warmup + _BENCH_REPEATS prove ufficiali, per ogni metrica si prende la mediana"""
+    _bench_once(executor, target, ctx_size)  # warmup, scartato
     runs = [_bench_once(executor, target, ctx_size) for _ in range(_BENCH_REPEATS)]
     return {
         "decode": round(median(r["decode"] for r in runs), 2),
@@ -300,20 +300,20 @@ def _bench_median(executor: Executor, target: Target, ctx_size: int) -> dict:
 
 
 def _score(metrics: dict, goal: str) -> float:
-    """按目标把多指标归一化加权成单一分数（越大越好）。
-    用相对量纲：解码/预填充以各自最大值为参考，TTFT 取倒数。"""
+    """Normalizza e pondera le metriche multiple in un unico punteggio in base all'obiettivo (piu' grande e' meglio).
+    Usa scale relative: decodifica/prefill rispetto al proprio massimo, TTFT preso come reciproco."""
     w = GOAL_WEIGHTS.get(goal, GOAL_WEIGHTS["latency"])
     decode = metrics.get("decode", 0)
     prefill = metrics.get("prefill", 0)
     ttft = metrics.get("ttft_ms", 0) or 1.0
-    # 归一化基准（经验上限，仅用于把不同量纲压到可比区间）
+    # Riferimento di normalizzazione (limite superiore empirico, serve solo a portare grandezze diverse in un intervallo confrontabile)
     score = (w["decode"] * decode +
-             w["prefill"] * (prefill / 100.0) +   # 预填充常上千，缩 100 倍
-             w["ttft"] * (1000.0 / ttft))         # TTFT 越小越好，取倒数
+             w["prefill"] * (prefill / 100.0) +   # il prefill e' spesso nell'ordine delle migliaia, ridotto di 100 volte
+             w["ttft"] * (1000.0 / ttft))         # piu' piccolo e' il TTFT meglio e', si prende il reciproco
     return round(score, 3)
 
 
-# ==================== 日志 / 任务 ====================
+# ==================== Log / Task ====================
 
 def _append_log(job_id: str, msg: str):
     with _LOCK:
@@ -329,7 +329,7 @@ def get_job(job_id: str) -> Optional[dict]:
 
 
 def list_active_jobs(target_id: str) -> list:
-    """返回该目标机正在运行的调优任务摘要，供前端刷新后恢复轮询。"""
+    """Restituisce il riepilogo del task di tuning in corso sulla macchina target, per riprendere il polling dopo un refresh del frontend."""
     with _LOCK:
         out = []
         for job in _JOBS.values():
@@ -351,37 +351,37 @@ def list_active_jobs(target_id: str) -> list:
         return out
 
 
-# ==================== 两阶段搜索 ====================
+# ==================== Ricerca in due fasi ====================
 
 def _run_one(executor: Executor, target: Target, engine: LlamaCppAdapter,
              model_path: str, cfg: dict, ctx_size: int, job_id: str,
              tag: str) -> Optional[dict]:
-    """启动一组配置→测速→停止，返回带 metrics 的结果；启动失败返回 None"""
+    """Avvia un gruppo di configurazione -> misura -> arresto, restituisce il risultato con le metriche; se l'avvio fallisce restituisce None"""
     label = _cfg_label(cfg)
     engine.stop()
     time.sleep(2)
     params = StartParams(model_path=model_path, extra_args=_args_list(cfg, target, ctx_size))
     ok, msg = engine.start(params)
     if not ok:
-        _append_log(job_id, f"  [{tag}] {label} 启动失败: {msg}")
+        _append_log(job_id, f"  [{tag}] {label} avvio non riuscito: {msg}")
         return None
     if not _wait_ready(executor, target):
-        _append_log(job_id, f"  [{tag}] {label} 启动超时(可能显存不足)")
+        _append_log(job_id, f"  [{tag}] {label} timeout di avvio (forse VRAM insufficiente)")
         engine.stop()
         return None
     metrics = _bench_median(executor, target, ctx_size)
     engine.stop()
     time.sleep(2)
-    _append_log(job_id, f"  [{tag}] {label} → 解码{metrics['decode']} t/s, "
-                        f"预填充{metrics['prefill']} t/s, GPU {metrics['gpu_util']}%")
+    _append_log(job_id, f"  [{tag}] {label} → decodifica {metrics['decode']} t/s, "
+                        f"prefill {metrics['prefill']} t/s, GPU {metrics['gpu_util']}%")
     return {"config": cfg, "label": label, "metrics": metrics}
 
 
 def _coarse_search(executor, target, engine, model_path, ctx_size,
                    model_size_gb, gpu_vram_gb, goal, job_id) -> Optional[dict]:
-    """阶段一：搜离散主导因素 spec-type × cache-type。
-    n-gpu-layers 默认 all（全进 GPU）；仅当 all 全部超显存时才降级用 0 兜底，
-    避免把纯 CPU 跑大模型这种必然慢的组合当常规候选浪费测速时间。"""
+    """Fase uno: cerca i fattori dominanti discreti spec-type x cache-type.
+    n-gpu-layers e' all di default (tutto in GPU); si ripiega su 0 solo quando tutte le combinazioni all superano la VRAM,
+    per non sprecare tempo di misura trattando come candidate normali combinazioni inevitabilmente lente come far girare un modello grande solo su CPU."""
     def _build(ngl):
         out = []
         for spec in SPEC_OPTIONS:
@@ -392,15 +392,15 @@ def _coarse_search(executor, target, engine, model_path, ctx_size,
                 if _fits_vram(cfg, model_size_gb, ctx_size, gpu_vram_gb):
                     out.append(cfg)
                 else:
-                    _append_log(job_id, f"  跳过(显存不足): {_cfg_label(cfg)}")
+                    _append_log(job_id, f"  Saltata (VRAM insufficiente): {_cfg_label(cfg)}")
         return out
 
     candidates = _build("all")
     if not candidates:
-        _append_log(job_id, "  全 GPU 组合均超显存，降级用 CPU 兜底(n-gpu-layers=0)")
+        _append_log(job_id, "  Tutte le combinazioni solo-GPU superano la VRAM, ripiego su CPU (n-gpu-layers=0)")
         candidates = _build("0")
 
-    _append_log(job_id, f"【阶段1 coarse】{len(candidates)} 组主导因素组合")
+    _append_log(job_id, f"[Fase 1 coarse] {len(candidates)} combinazioni di fattori dominanti")
     scored = []
     for i, cfg in enumerate(candidates):
         r = _run_one(executor, target, engine, model_path, cfg, ctx_size,
@@ -413,14 +413,14 @@ def _coarse_search(executor, target, engine, model_path, ctx_size,
         return None
     scored.sort(key=lambda x: x["score"], reverse=True)
     best = scored[0]
-    _append_log(job_id, f"  coarse 最优: {best['label']} (分 {best['score']})")
+    _append_log(job_id, f"  Migliore coarse: {best['label']} (punteggio {best['score']})")
     return best
 
 
 def _fine_search(executor, target, engine, model_path, ctx_size,
                  model_size_gb, gpu_vram_gb, goal, job_id,
                  base_cfg: dict) -> dict:
-    """阶段二：在 coarse 最优附近，对连续参数坐标下降收敛"""
+    """Fase due: attorno al migliore coarse, converge con discesa per coordinate sui parametri continui"""
     current = dict(base_cfg)
     cur = _run_one(executor, target, engine, model_path, current, ctx_size,
                    job_id, "fine base")
@@ -436,7 +436,7 @@ def _fine_search(executor, target, engine, model_path, ctx_size,
     if spec_on:
         tune_params += ["spec-draft-n-max", "spec-draft-n-min"]
 
-    _append_log(job_id, f"【阶段2 fine】坐标下降，调 {tune_params}")
+    _append_log(job_id, f"[Fase 2 fine] discesa per coordinate, regolo {tune_params}")
     for param in tune_params:
         options = CONTINUOUS_GRID.get(param, [])
         improved = True
@@ -444,7 +444,7 @@ def _fine_search(executor, target, engine, model_path, ctx_size,
             improved = False
             cur_val = int(best["config"].get(param, options[0]))
             idx = options.index(cur_val) if cur_val in options else 0
-            # 向两侧各探一步
+            # Si prova un passo per ciascun lato
             for ni in (idx - 1, idx + 1):
                 if ni < 0 or ni >= len(options):
                     continue
@@ -460,32 +460,32 @@ def _fine_search(executor, target, engine, model_path, ctx_size,
                 if r["score"] > best["score"]:
                     best = r
                     improved = True
-                    _append_log(job_id, f"    ✓ 改善: {param}={options[ni]} 分→{r['score']}")
+                    _append_log(job_id, f"    ✓ Miglioramento: {param}={options[ni]} punteggio→{r['score']}")
                     break
-    _append_log(job_id, f"  fine 收敛: {best['label']} (分 {best['score']})")
+    _append_log(job_id, f"  Convergenza fine: {best['label']} (punteggio {best['score']})")
     return best
 
 
-# ==================== 主流程 ====================
+# ==================== Flusso principale ====================
 
 def start_tune(target_id: str, model: str, ctx_size: int = 8192,
                goal: str = "latency", baseline_cfg: Optional[dict] = None,
                model_size_gb: float = 0.0) -> dict:
-    """启动两阶段调优任务。
-    baseline_cfg：用户原始参数（dict），作为基线先测一组对比。
-    model_size_gb：模型大小，用于显存预检；缺省按 0 跳过预检。
+    """Avvia il task di tuning in due fasi.
+    baseline_cfg: parametri originali dell'utente (dict), misurati per primi come gruppo di confronto di baseline.
+    model_size_gb: dimensione del modello, per la pre-verifica della VRAM; se omessa vale 0 e la pre-verifica viene saltata.
     """
     target = get_target(target_id)
     if not target:
-        return {"ok": False, "message": "目标机器不存在"}
+        return {"ok": False, "message": "Macchina target inesistente"}
     if not target.engine_path:
-        return {"ok": False, "message": "未配置推理引擎，请先在设置中安装"}
+        return {"ok": False, "message": "Motore di inferenza non configurato, installarlo prima nelle Impostazioni"}
     if getattr(target, "engine_type", "llama_cpp") != "llama_cpp":
-        return {"ok": False, "message": "自动调优目前仅支持 llama.cpp 引擎（vLLM 参数体系不同，暂不支持）"}
+        return {"ok": False, "message": "Il tuning automatico per ora supporta solo il motore llama.cpp (il sistema di parametri di vLLM e' diverso, non ancora supportato)"}
     if not target.models_dir or not model:
-        return {"ok": False, "message": "未选择模型或模型目录为空"}
+        return {"ok": False, "message": "Modello non selezionato o cartella dei modelli vuota"}
     if ctx_size < 1024:
-        return {"ok": False, "message": "ctx-size 过小，请至少 1024"}
+        return {"ok": False, "message": "ctx-size troppo piccolo, almeno 1024"}
 
     job_id = uuid.uuid4().hex[:8]
     with _LOCK:
@@ -506,24 +506,24 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
             engine = LlamaCppAdapter(executor, target)
 
             if not engine.check_installed():
-                _fail(job_id, "目标机未检测到推理引擎，请先一键安装")
-                _append_log(job_id, "✗ 未检测到推理引擎")
+                _fail(job_id, "Motore di inferenza non rilevato sulla macchina target, installarlo prima con un clic")
+                _append_log(job_id, "✗ Motore di inferenza non rilevato")
                 return
 
             model_path = path_join(target, target.models_dir, model)
 
-            # 取目标机显存；模型大小未传则自动探测（用于显存预检）
+            # Ricava la VRAM della macchina target; se la dimensione del modello non e' passata la rileva automaticamente (per la pre-verifica della VRAM)
             gpu_vram_gb = _get_gpu_vram(executor, target)
             if model_size_gb <= 0:
                 model_size_gb = _get_model_size_gb(executor, target, model_path)
-            _append_log(job_id, f"目标机显存: {gpu_vram_gb:.1f} GB | 模型: {model} "
-                                f"({model_size_gb:.1f} GB) | ctx 固定 {ctx_size} | 目标: "
+            _append_log(job_id, f"VRAM della macchina target: {gpu_vram_gb:.1f} GB | modello: {model} "
+                                f"({model_size_gb:.1f} GB) | ctx fisso {ctx_size} | obiettivo: "
                                 f"{GOAL_LABELS.get(goal, goal)}")
             all_results = []
 
-            # 基线：用户原始参数先测一遍
+            # Baseline: prima si misurano i parametri originali dell'utente
             if baseline_cfg:
-                _append_log(job_id, "【基线】测试你当前配置")
+                _append_log(job_id, "[Baseline] test della tua configurazione attuale")
                 b = _run_one(executor, target, engine, model_path, baseline_cfg,
                              ctx_size, job_id, "baseline")
                 if b:
@@ -531,31 +531,31 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
                     all_results.append(b)
                     with _LOCK:
                         _JOBS[job_id]["baseline"] = b
-                    _append_log(job_id, f"  基线分: {b['score']}")
+                    _append_log(job_id, f"  Punteggio baseline: {b['score']}")
 
-            # 阶段一 coarse
+            # Fase uno coarse
             coarse_best = _coarse_search(executor, target, engine, model_path,
                                          ctx_size, model_size_gb, gpu_vram_gb,
                                          goal, job_id)
             if not coarse_best:
-                _fail(job_id, "coarse 阶段无可用配置（可能显存不足）")
+                _fail(job_id, "Nessuna configurazione utilizzabile nella fase coarse (forse VRAM insufficiente)")
                 with _LOCK:
                     _JOBS[job_id]["results"] = all_results
                 return
             all_results.append(coarse_best)
 
-            # 阶段二 fine
+            # Fase due fine
             fine_best = _fine_search(executor, target, engine, model_path,
                                      ctx_size, model_size_gb, gpu_vram_gb,
                                      goal, job_id, coarse_best["config"])
             all_results.append(fine_best)
 
-            # 最终推荐 = fine 收敛结果；与基线对比
+            # Raccomandazione finale = risultato di convergenza della fase fine; confronto con la baseline
             final_best = fine_best if fine_best["score"] > 0 else coarse_best
             _finalize(job_id, all_results, final_best)
         except Exception as e:
             _fail(job_id, str(e))
-            _append_log(job_id, f"✗ 异常: {e}")
+            _append_log(job_id, f"✗ Eccezione: {e}")
         finally:
             try:
                 if executor:
@@ -570,7 +570,7 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
 
 
 def _get_model_size_gb(executor: Executor, target: Target, model_path: str) -> float:
-    """探测目标机上模型文件实际大小（GB），用于显存预检"""
+    """Rileva la dimensione reale (GB) del file del modello sulla macchina target, per la pre-verifica della VRAM"""
     if target.os == "windows":
         cmd = (f'powershell -Command "if(Test-Path \'{model_path}\')'
                f'{(chr(123))}(Get-Item \'{model_path}\').Length{(chr(125))}else{{0}}"')
@@ -608,7 +608,7 @@ def _fail(job_id: str, err: str):
 
 
 def _finalize(job_id: str, results: List[dict], best: dict):
-    # 标注推荐
+    # Segna la raccomandazione
     for r in results:
         r["recommended"] = (r["label"] == best["label"])
     with _LOCK:
@@ -617,11 +617,11 @@ def _finalize(job_id: str, results: List[dict], best: dict):
         job["results"] = results
         job["best"] = best
         _tid, _model, _ctx = job["target_id"], job["model"], job["ctx_size"]
-    _append_log(job_id, f"✓ 调优完成，推荐: {best['label']} (分 {best['score']})")
-    # 落盘最近调优参数，供部署页作为默认参数回填
+    _append_log(job_id, f"✓ Tuning completato, consigliata: {best['label']} (punteggio {best['score']})")
+    # Salva su disco gli ultimi parametri di tuning, per riempire i default della pagina Deploy
     try:
         from .tune_history import save_latest
         save_latest(_tid, _model, _ctx, best.get("config", {}),
                     source="tuner", score=best.get("score", 0))
     except Exception as e:
-        _append_log(job_id, f"  ⚠ 调优结果落盘失败: {e}")
+        _append_log(job_id, f"  ⚠ Salvataggio su disco del risultato di tuning non riuscito: {e}")

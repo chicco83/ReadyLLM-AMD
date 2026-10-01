@@ -1,4 +1,4 @@
-"""部署管理 API（基于用户配置的 Target）"""
+"""API di gestione del deploy (basata sul Target configurato dall'utente)"""
 
 import os
 import json
@@ -21,23 +21,23 @@ router = APIRouter()
 class DeployRequest(BaseModel):
     target_id: str
     model: str
-    # 用户手动编辑的命令行参数文本（优先）；如 "--ctx-size 8192 --batch-size 4096"
+    # Testo dei parametri da riga di comando modificato a mano dall'utente (ha priorita'); es. "--ctx-size 8192 --batch-size 4096"
     args_text: Optional[str] = None
-    # 向后兼容：直接传参数列表
+    # Retrocompatibilita': passaggio diretto della lista di parametri
     extra_args: Optional[list[str]] = None
 
 
 def _adapter(target_id: str):
     target = get_target(target_id)
     if not target:
-        raise HTTPException(status_code=404, detail="目标机器不存在，请先在设置中配置")
+        raise HTTPException(status_code=404, detail="Macchina target inesistente, configurarla prima nelle Impostazioni")
     executor = make_executor(target)
     return target, executor, get_adapter(executor, target)
 
 
-# ==================== 运行中模型记录 ====================
-# 记录每个 target 当前正在运行的模型名，供前端刷新后固定选中（不再回退默认）。
-# 持久化到本地 JSON，后端重启不丢失。
+# ==================== Registro dei modelli in esecuzione ====================
+# Registra il nome del modello attualmente in esecuzione per ogni target, cosi' il frontend lo mantiene selezionato dopo un refresh (senza tornare al default).
+# Persistito in un JSON locale: non si perde al riavvio del backend.
 _RUNNING_FILE = os.path.expanduser("~/.model-deploy-assistant/running_models.json")
 
 
@@ -74,30 +74,35 @@ def _get_running(target_id: str) -> str:
 
 @router.get("/models")
 def list_models(target_id: str):
-    """列出目标机器模型目录下的 .gguf 文件"""
+    """Elenca i file .gguf nella cartella dei modelli della macchina target (anche nelle sottocartelle)"""
     target, executor, _ = _adapter(target_id)
     try:
-        # vLLM / SGLang 加载 HuggingFace 权重（非 GGUF），模型目录扫描不适用，
-        # 返回明确提示，由用户在部署页直接填模型 ID 或本地权重目录。
+        # vLLM / SGLang caricano pesi HuggingFace (non GGUF): la scansione della cartella modelli non si applica,
+        # si restituisce un avviso esplicito e l'utente inserisce nella pagina Deploy l'ID del modello o la cartella dei pesi locali.
         engine_type = getattr(target, "engine_type", "llama_cpp") or "llama_cpp"
         if engine_type in ("vllm", "sglang"):
             return {
                 "models": [], "count": 0,
-                "error": f"{engine_type} 加载 HuggingFace 权重（非 GGUF），请直接填写模型 ID 或本地权重目录",
+                "error": f"{engine_type} carica pesi HuggingFace (non GGUF): inserire direttamente l'ID del modello o la cartella dei pesi locali",
             }
         if not target.models_dir:
-            return {"models": [], "count": 0, "error": "未配置模型目录"}
-        if target.os == "windows":
-            pattern = f'{target.models_dir}\\*.gguf'
-            result = executor.run(f'dir /b "{pattern}"', timeout=10)
-        else:
-            result = executor.run(f'ls -1 "{target.models_dir}"/*.gguf 2>/dev/null', timeout=10)
-        models = []
-        if result.ok and result.stdout:
-            for line in result.stdout.splitlines():
-                line = line.strip()
-                if line:
-                    models.append(line.split("\\")[-1].split("/")[-1])
+            return {"models": [], "count": 0, "error": "Cartella dei modelli non configurata"}
+        # [2026-10-01 v1.1.0] Scansione RICORSIVA: .gguf anche nelle sottocartelle.
+        # I nomi restituiti sono percorsi relativi a models_dir (es. "qwen/x.gguf").
+        # Versione precedente (sostituita, leggeva solo il primo livello):
+        # if target.os == "windows":
+        #     pattern = f'{target.models_dir}\\*.gguf'
+        #     result = executor.run(f'dir /b "{pattern}"', timeout=10)
+        # else:
+        #     result = executor.run(f'ls -1 "{target.models_dir}"/*.gguf 2>/dev/null', timeout=10)
+        # models = []
+        # if result.ok and result.stdout:
+        #     for line in result.stdout.splitlines():
+        #         line = line.strip()
+        #         if line:
+        #             models.append(line.split("\\")[-1].split("/")[-1])
+        from ..services.model_scanner import scan_models
+        models = scan_models(executor, target)
         return {"models": sorted(models), "count": len(models)}
     finally:
         executor.close()
@@ -105,16 +110,16 @@ def list_models(target_id: str):
 
 @router.get("/video-models")
 def list_video_models(target_id: str):
-    """扫描目标机 ComfyUI 的 diffusion_models 目录，列出真实存在的视频模型。
+    """Scansiona la cartella diffusion_models di ComfyUI sulla macchina target ed elenca i modelli video realmente presenti.
 
-    与文本部署扫 .gguf 同理：只列机器上实际下载好的权重，不再用写死清单。
-    ComfyUI 约定 diffusion_models 子目录存放主扩散模型（UNet/DiT）。
+    Come per la scansione dei .gguf nel deploy testuale: elenca solo i pesi effettivamente scaricati sulla macchina, senza piu' un elenco fisso nel codice.
+    Per convenzione ComfyUI la sottocartella diffusion_models contiene i modelli di diffusione principali (UNet/DiT).
     """
     target = get_target(target_id)
     if not target:
-        raise HTTPException(status_code=404, detail="目标机器不存在")
+        raise HTTPException(status_code=404, detail="Macchina target inesistente")
     if not target.models_dir:
-        return {"models": [], "count": 0, "error": "未配置模型目录"}
+        return {"models": [], "count": 0, "error": "Cartella dei modelli non configurata"}
 
     diff_dir = path_join(target, target.models_dir, "diffusion_models")
     executor = make_executor(target)
@@ -128,7 +133,7 @@ def list_video_models(target_id: str):
         if result.ok and result.stdout:
             for line in result.stdout.splitlines():
                 fn = line.strip().split("\\")[-1].split("/")[-1]
-                # 过滤 ComfyUI 占位文件（put_xxx_here）与空名
+                # Filtra i file segnaposto di ComfyUI (put_xxx_here) e i nomi vuoti
                 if not fn or fn.lower().startswith("put_"):
                     continue
                 models.append({
@@ -141,7 +146,7 @@ def list_video_models(target_id: str):
 
 
 def _pretty_video_name(filename: str) -> str:
-    """把权重文件名美化为可读标签（不依赖任何硬编码个人环境）。"""
+    """Trasforma il nome del file dei pesi in un'etichetta leggibile (senza dipendere da alcun ambiente personale cablato nel codice)."""
     low = filename.lower()
     if "minimax" in low and "h3" in low:
         tag = "pruned int8" if "pruned" in low and "int8" in low else (
@@ -156,7 +161,7 @@ def _pretty_video_name(filename: str) -> str:
     return filename.rsplit(".", 1)[0]
 
 
-# ComfyUI output 根目录：优先 engine_path/output，回退 models_dir 同级 output
+# Radice output di ComfyUI: preferisce engine_path/output, in alternativa output accanto a models_dir
 def _comfy_output_root(target) -> str:
     base = target.engine_path or (target.models_dir or "").rstrip("\\/").rsplit("\\/", 1)[0].rsplit("/", 1)[0]
     if not base:
@@ -165,7 +170,7 @@ def _comfy_output_root(target) -> str:
 
 
 def _safe_join(target, root: str, *parts: str) -> Optional[str]:
-    """把若干路径片段安全拼到 root 下，拒绝目录穿越（含 .. 或绝对路径）。"""
+    """Concatena in modo sicuro dei segmenti di percorso sotto root, rifiutando l'uscita dalla cartella (con .. o percorsi assoluti)."""
     p = root
     for seg in parts:
         if seg is None:
@@ -181,17 +186,17 @@ def _safe_join(target, root: str, *parts: str) -> Optional[str]:
 
 @router.get("/video-file")
 def get_video_file(target_id: str, filename: str, subfolder: str = ""):
-    """经 SSH/本地读取目标机 ComfyUI output 下的成片，以视频字节流返回，
-    供前端 <video> 直接预览（控制端无法直连目标机 ComfyUI 端口时的代理）。"""
+    """Legge via SSH/locale il video finito in ComfyUI output sulla macchina target e lo restituisce come flusso di byte,
+    per l'anteprima diretta con <video> nel frontend (proxy quando il controller non raggiunge direttamente la porta ComfyUI della macchina target)."""
     target = get_target(target_id)
     if not target:
-        raise HTTPException(status_code=404, detail="目标机器不存在")
+        raise HTTPException(status_code=404, detail="Macchina target inesistente")
     root = _comfy_output_root(target)
     if not root:
-        raise HTTPException(status_code=400, detail="未配置 ComfyUI 目录")
+        raise HTTPException(status_code=400, detail="Cartella ComfyUI non configurata")
     full = _safe_join(target, root, subfolder, filename)
     if not full:
-        raise HTTPException(status_code=400, detail="非法文件路径")
+        raise HTTPException(status_code=400, detail="Percorso file non valido")
 
     executor = make_executor(target)
     try:
@@ -199,7 +204,7 @@ def get_video_file(target_id: str, filename: str, subfolder: str = ""):
     finally:
         executor.close()
     if data is None:
-        raise HTTPException(status_code=404, detail="成片文件不存在或读取失败")
+        raise HTTPException(status_code=404, detail="File video inesistente o lettura non riuscita")
 
     low = filename.lower()
     media = "video/webm" if low.endswith(".webm") else "video/mp4"
@@ -209,26 +214,26 @@ def get_video_file(target_id: str, filename: str, subfolder: str = ""):
 
 @router.post("/start")
 def start_model(req: DeployRequest):
-    """启动模型（支持用户手动填写的运行参数）"""
+    """Avvia il modello (supporta i parametri di esecuzione inseriti a mano dall'utente)"""
     target, executor, engine = _adapter(req.target_id)
     try:
         model_path = path_join(target, target.models_dir, req.model)
-        # 解析参数：args_text 优先，回退 extra_args
+        # Interpretazione dei parametri: args_text ha priorita', in alternativa extra_args
         if req.args_text and req.args_text.strip():
             try:
                 extra = shlex.split(req.args_text.strip())
             except ValueError as e:
-                return {"success": False, "message": f"参数格式错误: {e}"}
+                return {"success": False, "message": f"Formato dei parametri errato: {e}"}
         else:
             extra = list(req.extra_args or [])
-        # 监控依赖 metrics；服务需对外可达 host。缺失则补，重复则去
+        # Il monitoraggio dipende dalle metriche; il servizio deve essere raggiungibile dall'esterno (host). Si aggiunge se manca, si elimina se duplicato
         joined = " ".join(extra)
         if "--metrics" not in joined:
             extra.append("--metrics")
         if "--host" not in joined:
             extra += ["--host", "0.0.0.0"]
-        # 用户在参数里改了端口时，回写机器配置并持久化，使监控/状态/生成自动跟随。
-        # （--port 已在 extra 中，llama_cpp 检测到就不会再补默认，启动端口与之一致）
+        # Se l'utente cambia la porta nei parametri, la riscrive nella configurazione della macchina e la persiste, cosi' monitoraggio/stato/generazione la seguono automaticamente.
+        # (--port e' gia' in extra: llama_cpp, se lo rileva, non aggiunge piu' il default, quindi la porta di avvio coincide)
         for i, tok in enumerate(extra):
             if tok == "--port" and i + 1 < len(extra):
                 try:
@@ -250,7 +255,7 @@ def start_model(req: DeployRequest):
 
 @router.post("/stop")
 def stop_model(target_id: str):
-    """停止模型"""
+    """Ferma il modello"""
     target, executor, engine = _adapter(target_id)
     try:
         success, msg = engine.stop()
@@ -263,8 +268,8 @@ def stop_model(target_id: str):
 
 @router.get("/status")
 def get_status(target_id: str):
-    """获取运行状态。model 字段返回当前运行中的模型名（若有），
-    供前端刷新后固定选中正在运行的模型，而非回退到列表第一个。"""
+    """Restituisce lo stato di esecuzione. Il campo model riporta il nome del modello attualmente in esecuzione (se presente),
+    cosi' il frontend dopo un refresh mantiene selezionato il modello in esecuzione invece di tornare al primo della lista."""
     target, executor, engine = _adapter(target_id)
     try:
         running = engine.is_running()
@@ -274,7 +279,7 @@ def get_status(target_id: str):
         executor.close()
 
 
-# ==================== 视频生成（ComfyUI） ====================
+# ==================== Generazione video (ComfyUI) ====================
 
 class VideoGenerateRequest(BaseModel):
     target_id: str
@@ -288,34 +293,34 @@ class VideoGenerateRequest(BaseModel):
     cfg: float = 6.0
     seed: Optional[int] = None
     fps: int = 16
-    # 是否让大模型把粗略描述编排成电影级提示词并推荐采样参数（路线 A）
+    # Se far orchestrare al modello LLM la descrizione grezza in un prompt cinematografico e raccomandare i parametri di campionamento (percorso A)
     enhance: bool = False
-    # I2V：控制端（本机）上的首帧图绝对路径。非空则上传到目标机 ComfyUI/input
-    # 并走图生视频；为空则纯 T2V。
+    # I2V: percorso assoluto, sul controller (macchina locale), dell'immagine del primo fotogramma. Se non vuoto viene caricata su ComfyUI/input della macchina target
+    # ed esegue image-to-video; se vuoto, T2V puro.
     image_path: Optional[str] = None
-    # R2V：控制端上的多张角色参考图绝对路径列表。非空则走参考图生视频
-    # （MiniMaxH3ReferenceToVideo，身份由模型内部对齐，锁人物一致性）。
-    # 优先级高于 image_path。
+    # R2V: elenco dei percorsi assoluti, sul controller, di piu' immagini di riferimento dei personaggi. Se non vuoto si usa il reference-to-video
+    # (MiniMaxH3ReferenceToVideo, l'identita' e' allineata internamente dal modello, blocca la coerenza dei personaggi).
+    # Ha priorita' piu' alta di image_path.
     ref_image_paths: Optional[list] = None
-    # TeaCache 采样加速：跳过相邻冗余去噪步。实测约 1.3-3× 提速（视步数）。
+    # Accelerazione di campionamento TeaCache: salta i passi di denoising adiacenti ridondanti. Misurato circa 1.3-3x di velocita' (secondo i passi).
     teacache: bool = False
     teacache_thresh: float = 0.15
 
 
 @router.post("/generate")
 def generate_video(req: VideoGenerateRequest):
-    """向 ComfyUI 提交一次 text-to-video 生成任务，返回 prompt_id。
+    """Invia a ComfyUI un task di generazione text-to-video e restituisce prompt_id.
 
-    仅适用于 engine_type=comfyui 的 Target。提交后由前端轮询
-    /generate/progress 获取状态与成片路径。"""
+    Si applica solo ai Target con engine_type=comfyui. Dopo l'invio il frontend esegue il polling di
+    /generate/progress per ottenere stato e percorso del video."""
     target, executor, engine = _adapter(req.target_id)
     try:
         if not hasattr(engine, "submit_workflow"):
-            return {"success": False, "message": "当前目标机引擎不支持视频生成，请改用 ComfyUI"}
+            return {"success": False, "message": "Il motore della macchina target non supporta la generazione video, usare ComfyUI"}
         if not engine.is_running():
-            return {"success": False, "message": "ComfyUI 服务未运行，请先在部署页启动"}
+            return {"success": False, "message": "Il servizio ComfyUI non e' in esecuzione, avviarlo prima dalla pagina Deploy"}
 
-        # 路线 A：可选的 LLM 提示词编排。失败优雅降级为原始 prompt，绝不阻断生成。
+        # Percorso A: orchestrazione facoltativa del prompt via LLM. Un fallimento degrada con grazia al prompt originale, senza mai bloccare la generazione.
         prompt = req.prompt
         steps = req.steps
         cfg = req.cfg
@@ -323,8 +328,8 @@ def generate_video(req: VideoGenerateRequest):
         reasoning = ""
         if req.enhance:
             from ..services.video_prompt import enhance_prompt
-            # 按输入推断 H3 生成模式：有参考图走 R2V（六段式锁身份），
-            # 有首帧图走 I2V（三字段+对齐指令），否则 T2V。
+            # Deduce dall'input la modalita' di generazione H3: con immagine di riferimento R2V (sei sezioni, blocca l'identita'),
+            # con immagine del primo fotogramma I2V (tre campi + istruzione di allineamento), altrimenti T2V.
             if req.ref_image_paths:
                 _mode, _pc = "r2v", len(req.ref_image_paths)
             elif req.image_path:
@@ -342,28 +347,28 @@ def generate_video(req: VideoGenerateRequest):
                 reasoning = e.get("reasoning", "")
                 enhanced = True
 
-        # I2V：把控制端本地首帧图上传到目标机 ComfyUI/input，取回文件名
+        # I2V: carica l'immagine del primo fotogramma locale del controller su ComfyUI/input della macchina target e recupera il nome del file
         image_name = ""
         upload_err = ""
         if req.image_path:
             import os as _os
             import uuid as _uuid
             if not _os.path.exists(req.image_path):
-                return {"success": False, "message": f"首帧图不存在: {req.image_path}"}
+                return {"success": False, "message": f"Immagine del primo fotogramma inesistente: {req.image_path}"}
             try:
                 with open(req.image_path, "rb") as _f:
                     img_bytes = _f.read()
             except Exception as e:
-                return {"success": False, "message": f"读取首帧图失败: {e}"}
+                return {"success": False, "message": f"Lettura dell'immagine del primo fotogramma non riuscita: {e}"}
             ext = _os.path.splitext(req.image_path)[1] or ".png"
             image_name = f"mdframe_{_uuid.uuid4().hex[:8]}{ext}"
             input_dir = path_join(target, target.engine_path or "", "input")
             remote = path_join(target, input_dir, image_name)
             if not executor.write_file_bytes(img_bytes, remote):
-                return {"success": False, "message": "首帧图上传到目标机 input 目录失败"}
+                return {"success": False, "message": "Caricamento dell'immagine del primo fotogramma nella cartella input della macchina target non riuscito"}
 
-        # R2V：把控制端多张角色参考图上传到目标机 ComfyUI/input，收集文件名列表。
-        # 优先级高于 I2V（同一请求两者都给时走 R2V）。
+        # R2V: carica su ComfyUI/input della macchina target le immagini di riferimento dei personaggi del controller e raccoglie l'elenco dei nomi file.
+        # Ha priorita' su I2V (se la stessa richiesta fornisce entrambi si usa R2V).
         ref_image_names = []
         if req.ref_image_paths:
             import os as _os
@@ -371,17 +376,17 @@ def generate_video(req: VideoGenerateRequest):
             input_dir = path_join(target, target.engine_path or "", "input")
             for rp in req.ref_image_paths:
                 if not _os.path.exists(rp):
-                    return {"success": False, "message": f"参考图不存在: {rp}"}
+                    return {"success": False, "message": f"Immagine di riferimento inesistente: {rp}"}
                 try:
                     with open(rp, "rb") as _f:
                         rb = _f.read()
                 except Exception as e:
-                    return {"success": False, "message": f"读取参考图失败: {e}"}
+                    return {"success": False, "message": f"Lettura dell'immagine di riferimento non riuscita: {e}"}
                 ext = _os.path.splitext(rp)[1] or ".png"
                 rname = f"mdref_{_uuid.uuid4().hex[:8]}{ext}"
                 rremote = path_join(target, input_dir, rname)
                 if not executor.write_file_bytes(rb, rremote):
-                    return {"success": False, "message": f"参考图上传失败: {rp}"}
+                    return {"success": False, "message": f"Caricamento dell'immagine di riferimento non riuscito: {rp}"}
                 ref_image_names.append(rname)
 
         workflow = engine.build_video_workflow(
@@ -406,7 +411,7 @@ def generate_video(req: VideoGenerateRequest):
         return {
             "success": True,
             "prompt_id": result,
-            "message": "生成任务已提交",
+            "message": "Task di generazione inviato",
             "enhanced": enhanced,
             "i2v": bool(image_name) and not ref_image_names,
             "r2v": bool(ref_image_names),
@@ -421,11 +426,11 @@ def generate_video(req: VideoGenerateRequest):
 
 @router.get("/generate/progress")
 def generate_progress(target_id: str, prompt_id: str):
-    """查询视频生成任务状态；完成时返回成片信息。"""
+    """Interroga lo stato del task di generazione video; a completamento restituisce le informazioni sul video."""
     target, executor, engine = _adapter(target_id)
     try:
         if not hasattr(engine, "get_progress"):
-            return {"state": "error", "message": "当前引擎不支持生成任务查询"}
+            return {"state": "error", "message": "Il motore attuale non supporta l'interrogazione dei task di generazione"}
         prog = engine.get_progress(prompt_id)
         if prog.get("state") == "completed":
             outputs = prog.get("outputs") or {}
@@ -445,9 +450,9 @@ def generate_progress(target_id: str, prompt_id: str):
 
 
 
-# ==================== 默认参数（调优回填 / 确定性回退） ====================
+# ==================== Parametri di default (riempimento da tuning / ripiego deterministico) ====================
 
-# 命令行展示顺序（影响观感，不影响功能）
+# Ordine di visualizzazione della riga di comando (influisce sull'aspetto, non sulla funzionalita')
 _ARG_ORDER = [
     "ctx-size", "n-gpu-layers", "batch-size", "ubatch-size",
     "cache-type-k", "cache-type-v", "flash-attn", "fit",
@@ -457,7 +462,7 @@ _ARG_ORDER = [
 
 
 def _params_to_args_str(params: dict) -> str:
-    """扁平参数字典 -> 可编辑命令行字符串"""
+    """Dizionario piatto di parametri -> stringa di riga di comando modificabile"""
     keys = [k for k in _ARG_ORDER if k in params] + \
            [k for k in params if k not in _ARG_ORDER]
     parts = []
@@ -471,8 +476,8 @@ def _params_to_args_str(params: dict) -> str:
 
 
 def _ensure_port(args_str: str, port: int) -> str:
-    """确保参数串含 --port {port}：已有则原样（尊重用户编辑），无则追加。
-    让部署页参数框展示端口，用户可直接改端口固定服务监听。"""
+    """Garantisce che la stringa di parametri contenga --port {port}: se c'e' gia' resta invariata (rispetta le modifiche dell'utente), altrimenti la aggiunge.
+    Cosi' il riquadro parametri della pagina Deploy mostra la porta e l'utente puo' modificarla direttamente per fissare l'ascolto del servizio."""
     try:
         toks = args_str.split()
     except AttributeError:
@@ -483,7 +488,7 @@ def _ensure_port(args_str: str, port: int) -> str:
 
 
 def _model_size_gb(executor, target, model: str) -> float:
-    """查目标机上模型文件实际大小（GB），失败返回 0"""
+    """Interroga la dimensione reale (GB) del file del modello sulla macchina target; in caso di errore restituisce 0"""
     p = path_join(target, target.models_dir, model)
     if target.os == "windows":
         cmd = f'powershell -Command "(Get-Item \'{p}\').Length"'
@@ -498,16 +503,16 @@ def _model_size_gb(executor, target, model: str) -> float:
 
 @router.get("/default-args")
 def default_args(target_id: str, model: str):
-    """返回部署默认参数：优先最近调优结果，无则用确定性生成器现算。
+    """Restituisce i parametri di deploy di default: priorita' al risultato di tuning piu' recente, altrimenti li calcola col generatore deterministico.
 
-    返回可直接编辑的命令行字符串，供前端预填到参数框。
+    Restituisce una stringa di riga di comando direttamente modificabile, per precompilare il riquadro parametri del frontend.
     """
     target = get_target(target_id)
     if not target:
-        raise HTTPException(status_code=404, detail="目标机器不存在")
+        raise HTTPException(status_code=404, detail="Macchina target inesistente")
 
-    # 0) 非 llama.cpp 引擎（vLLM / SGLang）：调优历史与确定性参数生成器都只面向
-    #    llama.cpp 参数体系，对它们不适用；直接返回该引擎适配器声明的通用默认参数。
+    # 0) Motori diversi da llama.cpp (vLLM / SGLang): storico di tuning e generatore deterministico di parametri sono entrambi
+    #    pensati solo per il sistema di parametri di llama.cpp e non si applicano a questi motori; restituisce direttamente i parametri di default generici dichiarati dall'adattatore del motore.
     engine_type = getattr(target, "engine_type", "llama_cpp") or "llama_cpp"
     if engine_type in ("vllm", "sglang"):
         from ..services import sglang, vllm
@@ -517,10 +522,10 @@ def default_args(target_id: str, model: str):
             "source": "engine_default",
             "score": 0,
             "ts": "",
-            "reasoning": [f"{engine_type} 使用引擎通用默认参数（该引擎暂不支持自动调优）"],
+            "reasoning": [f"{engine_type} usa i parametri di default generici del motore (il motore non supporta ancora il tuning automatico)"],
         }
 
-    # 1) 优先：最近一次调优参数
+    # 1) Priorita': parametri dell'ultimo tuning
     rec = tune_history.get_latest(target_id, model)
     if rec and rec.get("params"):
         return {
@@ -530,7 +535,7 @@ def default_args(target_id: str, model: str):
             "ts": rec.get("ts", ""),
         }
 
-    # 2) 回退：确定性生成器（需现采硬件 + 模型大小）
+    # 2) Ripiego: generatore deterministico (richiede hardware rilevato al momento + dimensione del modello)
     executor = make_executor(target)
     try:
         from ..services.config_generator import generate_config
@@ -540,7 +545,7 @@ def default_args(target_id: str, model: str):
         mem = hw.get("memory") or {}
         vram = gpu.get("total_memory_gb", 0) or 0
         if not vram and mem.get("total_gb"):
-            # Apple Silicon 统一内存：按物理内存×0.75 估算可用显存
+            # Memoria unificata Apple Silicon: VRAM utilizzabile stimata come memoria fisica x 0.75
             vram = round(mem["total_gb"] * 0.75, 1)
         size_gb = _model_size_gb(executor, target, model)
         cores = cpu.get("cores", 8) or 8
@@ -557,14 +562,14 @@ def default_args(target_id: str, model: str):
             "reasoning": gen.get("reasoning", []),
         }
     except Exception as e:
-        # 3) 兜底：空参数，让后端用引擎默认
+        # 3) Ultima risorsa: parametri vuoti, il backend usa i default del motore
         return {"args": _ensure_port("", target.service_port), "source": "default", "score": 0, "ts": "", "error": str(e)}
     finally:
         executor.close()
 
 
 
-# ==================== 长视频（分镜 → 逐段 I2V → 拼接） ====================
+# ==================== Video lungo (storyboard -> I2V segmento per segmento -> concatenazione) ====================
 
 class StoryboardRequest(BaseModel):
     theme: str
@@ -574,19 +579,19 @@ class StoryboardRequest(BaseModel):
 
 @router.post("/storyboard")
 def make_storyboard(req: StoryboardRequest):
-    """把主题拆成分镜脚本（不落库，仅返回预览供用户确认/编辑）。"""
+    """Scompone il tema in uno storyboard (non salvato, restituisce solo l'anteprima per conferma/modifica dell'utente)."""
     from ..services.video_storyboard import generate_storyboard
     sb = generate_storyboard(req.theme, req.total_seconds, req.max_shots)
     if not sb:
         return {"success": False,
-                "message": "分镜生成失败：请确认已在设置中配置可用的大模型 API"}
+                "message": "Generazione dello storyboard non riuscita: verificare che nelle Impostazioni sia configurata un'API LLM utilizzabile"}
     return {"success": True, "storyboard": sb}
 
 
 class LongVideoRequest(BaseModel):
     target_id: str
     storyboard: dict
-    # R2V：角色参考图绝对路径列表，每段共用同一组锁身份，镜头间硬切。
+    # R2V: elenco dei percorsi assoluti delle immagini di riferimento dei personaggi, ogni segmento condivide lo stesso gruppo per bloccare l'identita', tagli netti tra le inquadrature.
     ref_image_paths: Optional[list] = None
     width: int = 832
     height: int = 480
@@ -597,9 +602,9 @@ class LongVideoRequest(BaseModel):
 
 @router.post("/long-video")
 def submit_long_video(req: LongVideoRequest):
-    """提交长视频生成任务：按分镜逐段 R2V 串行生成（同一组参考图锁人物身份）、
-    镜头硬切、拼接成片。立即返回 job_id，后台线程推进；前端轮询
-    /long-video/progress 看逐段进度。"""
+    """Invia il task di generazione video lungo: segmento per segmento in R2V in serie (stesso gruppo di immagini di riferimento per bloccare l'identita' dei personaggi),
+    tagli netti tra le inquadrature, concatenazione nel video finale. Restituisce subito job_id, il thread in background avanza; il frontend esegue il polling di
+    /long-video/progress per l'avanzamento segmento per segmento."""
     from ..services.video_pipeline import start_long_video
     res = start_long_video(
         target_id=req.target_id,
@@ -613,7 +618,7 @@ def submit_long_video(req: LongVideoRequest):
 
 @router.get("/long-video/progress")
 def long_video_progress(job_id: str):
-    """查询长视频任务逐段进度；完成时返回拼接成片文件名（供 /video-file 预览）。"""
+    """Interroga l'avanzamento segmento per segmento del task di video lungo; a completamento restituisce il nome del file concatenato (per l'anteprima /video-file)."""
     from ..services.video_pipeline import get_job
     job = get_job(job_id)
     if not job:
@@ -635,8 +640,8 @@ def long_video_progress(job_id: str):
 
 class UpscaleRequest(BaseModel):
     target_id: str
-    # 二选一：image_path 是控制端本地图片绝对路径（会上传到目标机 input），
-    # image_name 是已在 ComfyUI input 目录里的图名。
+    # Alternativa: image_path e' il percorso assoluto dell'immagine locale del controller (verra' caricata nella cartella input della macchina target),
+    # image_name e' il nome di un'immagine gia' presente nella cartella input di ComfyUI.
     image_path: Optional[str] = None
     image_name: Optional[str] = None
     out_w: int = 1920
@@ -645,47 +650,47 @@ class UpscaleRequest(BaseModel):
 
 @router.post("/upscale")
 def upscale_image(req: UpscaleRequest):
-    """提交单图 AI 超分（RealESRGAN_x4plus → lanczos 收敛到 out_w×out_h）。
+    """Invia il task di super-risoluzione AI di una singola immagine (RealESRGAN_x4plus -> lanczos fino a out_w x out_h).
 
-    复用 ComfyUI 引擎；提交后由 /generate/progress 轮询（SaveImage 输出在
-    images 字段，progress 逻辑已收集）。仅 engine_type=comfyui 的 Target 可用。"""
+    Riusa il motore ComfyUI; dopo l'invio si fa polling con /generate/progress (l'output SaveImage e' nel
+    campo images, la logica di progress lo ha gia' raccolto). Disponibile solo per i Target con engine_type=comfyui."""
     target, executor, engine = _adapter(req.target_id)
     try:
         if not hasattr(engine, "build_upscale_workflow"):
-            return {"success": False, "message": "当前引擎不支持超分，请改用 ComfyUI"}
+            return {"success": False, "message": "Il motore attuale non supporta la super-risoluzione, usare ComfyUI"}
         if not engine.is_running():
-            return {"success": False, "message": "ComfyUI 服务未运行，请先在部署页启动"}
+            return {"success": False, "message": "Il servizio ComfyUI non e' in esecuzione, avviarlo prima dalla pagina Deploy"}
         name = req.image_name or ""
         if req.image_path:
             import os as _os
             import uuid as _uuid
             if not _os.path.exists(req.image_path):
-                return {"success": False, "message": f"图片不存在: {req.image_path}"}
+                return {"success": False, "message": f"Immagine inesistente: {req.image_path}"}
             try:
                 with open(req.image_path, "rb") as _f:
                     b = _f.read()
             except Exception as e:
-                return {"success": False, "message": f"读取图片失败: {e}"}
+                return {"success": False, "message": f"Lettura dell'immagine non riuscita: {e}"}
             ext = _os.path.splitext(req.image_path)[1] or ".png"
             name = f"mdup_{_uuid.uuid4().hex[:8]}{ext}"
             input_dir = path_join(target, target.engine_path or "", "input")
             if not executor.write_file_bytes(b, path_join(target, input_dir, name)):
-                return {"success": False, "message": "图片上传到目标机 input 目录失败"}
+                return {"success": False, "message": "Caricamento dell'immagine nella cartella input della macchina target non riuscito"}
         if not name:
-            return {"success": False, "message": "需提供 image_path 或 image_name"}
+            return {"success": False, "message": "Occorre fornire image_path o image_name"}
         wf = engine.build_upscale_workflow(
             image_name=name, out_w=req.out_w, out_h=req.out_h)
         ok, result = engine.submit_workflow(wf)
         if not ok:
             return {"success": False, "message": result}
-        return {"success": True, "prompt_id": result, "message": "超分任务已提交"}
+        return {"success": True, "prompt_id": result, "message": "Task di super-risoluzione inviato"}
     finally:
         executor.close()
 
 
 class UpscaleVideoRequest(BaseModel):
     target_id: str
-    # ComfyUI output 里的成片文件名（如 mdfinal_xxx.mp4）
+    # Nome del file video finito in ComfyUI output (es. mdfinal_xxx.mp4)
     filename: str
     subfolder: str = "modeldeploy"
     out_w: int = 1920
@@ -695,9 +700,9 @@ class UpscaleVideoRequest(BaseModel):
 
 @router.post("/upscale-video")
 def submit_upscale_video(req: UpscaleVideoRequest):
-    """提交成片整体超分任务：抽帧 → 逐帧 RealESRGAN 超分到 out_w×out_h →
-    按原 fps 合成 → 接回原音轨。立即返回 job_id，后台线程推进；前端轮询
-    /upscale-video/progress 看逐帧进度。"""
+    """Invia il task di super-risoluzione dell'intero video finito: estrazione fotogrammi -> super-risoluzione RealESRGAN fotogramma per fotogramma a out_w x out_h ->
+    ricomposizione all'fps originale -> riapplicazione della traccia audio originale. Restituisce subito job_id, il thread in background avanza; il frontend esegue il polling di
+    /upscale-video/progress per l'avanzamento fotogramma per fotogramma."""
     from ..services.upscale_pipeline import start_upscale_video
     return start_upscale_video(
         target_id=req.target_id,
@@ -709,7 +714,7 @@ def submit_upscale_video(req: UpscaleVideoRequest):
 
 @router.get("/upscale-video/progress")
 def upscale_video_progress(job_id: str):
-    """查询成片超分任务进度；完成时返回超分成片文件名（供 /video-file 预览）。"""
+    """Interroga l'avanzamento del task di super-risoluzione del video finito; a completamento restituisce il nome del file ad alta risoluzione (per l'anteprima /video-file)."""
     from ..services.upscale_pipeline import get_job
     job = get_job(job_id)
     if not job:

@@ -1,4 +1,4 @@
-"""推理引擎统一适配层"""
+"""Livello di adattamento unificato dei motori di inferenza"""
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -21,7 +21,7 @@ class StartParams:
 
 
 class EngineAdapter(ABC):
-    """推理引擎统一接口"""
+    """Interfaccia unificata dei motori di inferenza"""
 
     @abstractmethod
     def name(self) -> str: ...

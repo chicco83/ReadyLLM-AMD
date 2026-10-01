@@ -1,13 +1,13 @@
-"""调优结果持久化
+"""Persistenza dei risultati di tuning
 
-智能调优（tuner / ai_tuner）的推荐参数此前只存在内存 _JOBS，后端重启即丢失。
-本模块把每次调优的「最优参数」按 (目标机, 模型) 落盘，供部署页作为默认参数回填。
+I parametri raccomandati dal tuning intelligente (tuner / ai_tuner) prima esistevano solo in memoria in _JOBS e andavano persi al riavvio del backend.
+Questo modulo salva su disco i «parametri ottimali» di ogni tuning per (macchina target, modello), cosi' la pagina Deploy li usa per precompilare i parametri di default.
 
-存储：~/.model-deploy-assistant/tune_history.json
-结构：{ "<target_id>::<model>": {params, ctx_size, source, score, ts} }
-同一台机器同一个模型只保留最近一次（覆盖写）。
+Archivio: ~/.model-deploy-assistant/tune_history.json
+Struttura: { "<target_id>::<model>": {params, ctx_size, source, score, ts} }
+Per la stessa macchina e lo stesso modello si conserva solo l'ultimo risultato (sovrascrittura).
 
-params 为扁平字典 {参数名: 值}，参数名不带 -- 前缀，不含 ctx-size（单独存）。
+params e' un dizionario piatto {nome parametro: valore}, i nomi non hanno il prefisso -- e non includono ctx-size (salvato a parte).
 """
 
 import json
@@ -52,12 +52,12 @@ def save_latest(
     source: str = "tuner",
     score: float = 0.0,
 ) -> None:
-    """记录某目标机+模型的最近一次调优最优参数（覆盖写）。
+    """Registra gli ultimi parametri ottimali di tuning di una macchina target + modello (sovrascrittura).
 
     Args:
-        params: 扁平参数字典 {参数名: 值}，不含 ctx-size
-        source: 'tuner'（自动调优）或 'ai_tuner'（AI 调优）
-        score: 该配置的测速得分（t/s），供前端展示
+        params: dizionario piatto di parametri {nome parametro: valore}, senza ctx-size
+        source: 'tuner' (tuning automatico) o 'ai_tuner' (tuning AI)
+        score: punteggio di velocita' misurato di quella configurazione (t/s), mostrato dal frontend
     """
     if not params:
         return
@@ -74,10 +74,10 @@ def save_latest(
 
 
 def get_latest(target_id: str, model: str) -> Optional[dict]:
-    """取某目标机+模型最近一次调优参数。
+    """Recupera gli ultimi parametri di tuning di una macchina target + modello.
 
-    返回时把 ctx_size 并入 params（键 'ctx-size'），便于前端直接渲染完整命令行。
-    无记录返回 None。
+    Alla restituzione unisce ctx_size in params (chiave 'ctx-size'), cosi' il frontend puo' rendere direttamente la riga di comando completa.
+    Se non c'e' alcun record restituisce None.
     """
     with _LOCK:
         rec = _load().get(_key(target_id, model))
@@ -96,6 +96,6 @@ def get_latest(target_id: str, model: str) -> Optional[dict]:
 
 
 def list_history() -> dict:
-    """返回全部历史（调试/展示用）"""
+    """Restituisce tutta la cronologia (per debug/visualizzazione)"""
     with _LOCK:
         return _load()

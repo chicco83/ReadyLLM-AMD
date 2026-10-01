@@ -1,12 +1,12 @@
-"""推理引擎检测与一键安装
+"""Rilevamento del motore di inferenza e installazione con un clic
 
-面向所有用户：若目标机尚未安装 llama.cpp（llama-server），
-提供一键安装。按目标 OS 选择安装方式：
-  - Windows：下载官方预编译 CUDA 包并解压
-  - macOS：Homebrew 安装
-  - Linux：源码编译
+Pensato per tutti gli utenti: se sulla macchina target non e' ancora installato llama.cpp (llama-server),
+offre l'installazione con un clic. Il metodo di installazione dipende dal sistema operativo di destinazione:
+  - Windows: scarica il pacchetto precompilato ufficiale (CUDA / HIP-ROCm / Vulkan / CPU) e lo decomprime
+  - macOS: installazione con Homebrew
+  - Linux: compilazione dai sorgenti (CUDA / ROCm / Vulkan / CPU)
 
-安装为耗时操作，采用后台线程执行 + 日志轮询，避免 HTTP 超时。
+L'installazione e' un'operazione lunga: si usa un thread in background + polling dei log, per evitare timeout HTTP.
 """
 
 import threading
@@ -17,15 +17,15 @@ from typing import Optional, List
 from .executor import Executor
 from ..models.target import Target
 
-# 全局安装任务表：job_id -> {status, logs, target_id, result}
+# Tabella globale dei task di installazione: job_id -> {status, logs, target_id, result}
 _JOBS: dict[str, dict] = {}
 _LOCK = threading.Lock()
 
 
-# ==================== 检测 ====================
+# ==================== Rilevamento ====================
 
 def detect_engine(executor: Executor, target: Target) -> dict:
-    """检测目标机是否已安装所选推理引擎（按 engine_type 分发）"""
+    """Rileva se sulla macchina target e' installato il motore di inferenza scelto (smistamento per engine_type)"""
     engine_type = getattr(target, "engine_type", "llama_cpp") or "llama_cpp"
     if engine_type == "vllm":
         return _detect_vllm(executor, target)
@@ -37,12 +37,12 @@ def detect_engine(executor: Executor, target: Target) -> dict:
 
 
 def _detect_comfyui(executor: Executor, target: Target) -> dict:
-    """检测 ComfyUI 是否已安装：安装根目录下的 main.py 入口是否存在。
-    engine_path 对 ComfyUI 语义是安装根目录（非可执行文件）。"""
+    """Rileva se ComfyUI e' installato: verifica l'esistenza del punto di ingresso main.py nella cartella radice di installazione.
+    Per ComfyUI engine_path indica la cartella radice di installazione (non un eseguibile)."""
     d = target.engine_path
     if not d:
         return {"installed": False, "engine": "comfyui", "path": "", "version": "",
-                "reason": "未配置 ComfyUI 安装目录（engine_path 应指向 ComfyUI 根目录）"}
+                "reason": "Cartella di installazione di ComfyUI non configurata (engine_path deve puntare alla cartella radice di ComfyUI)"}
     main_py = _join(d, "main.py")
     if target.os == "windows":
         found = "FOUND" in executor.run(f'if exist "{main_py}" (echo FOUND)').stdout
@@ -50,18 +50,18 @@ def _detect_comfyui(executor: Executor, target: Target) -> dict:
         found = "FOUND" in executor.run(f'test -f "{main_py}" && echo FOUND').stdout
     version = ""
     if found:
-        # 读 ComfyUI 版本号文件（commit 短哈希）
+        # Legge il numero di versione di ComfyUI (hash breve del commit)
         vr = executor.run(f'cd "{d}" && git rev-parse --short HEAD 2>&1', timeout=10)
         if vr.ok:
             version = vr.stdout.strip()
     return {
         "installed": found, "engine": "comfyui", "path": d, "version": version,
-        "reason": "" if found else "指定目录下未找到 ComfyUI（main.py）",
+        "reason": "" if found else "ComfyUI (main.py) non trovato nella cartella indicata",
     }
 
 
 def _join(base: str, name: str) -> str:
-    """跨平台路径拼接（Windows 反斜杠 / 其他正斜杠）。"""
+    """Concatenazione di percorsi multipiattaforma (barra rovesciata su Windows / barra diretta altrove)."""
     if "\\" in base or ":" in base and "/" not in base:
         sep = "\\"
     elif base.endswith("/") or base.endswith("\\"):
@@ -74,10 +74,10 @@ def _join(base: str, name: str) -> str:
 
 
 def _detect_llama(executor: Executor, target: Target) -> dict:
-    """检测 llama-server 二进制是否存在"""
+    """Rileva se il binario llama-server esiste"""
     exe = target.engine_path
     if not exe:
-        return {"installed": False, "engine": "llama_cpp", "reason": "未配置引擎路径", "path": ""}
+        return {"installed": False, "engine": "llama_cpp", "reason": "Percorso del motore non configurato", "path": ""}
 
     if target.os == "windows":
         result = executor.run(f'if exist "{exe}" (echo FOUND)')
@@ -96,18 +96,18 @@ def _detect_llama(executor: Executor, target: Target) -> dict:
         "engine": "llama_cpp",
         "path": exe,
         "version": version,
-        "reason": "" if found else "指定路径下未找到 llama-server",
+        "reason": "" if found else "llama-server non trovato nel percorso indicato",
     }
 
 
 def _detect_vllm(executor: Executor, target: Target) -> dict:
-    """检测 vLLM 是否可用（pip 安装后 vllm 命令在 PATH）"""
+    """Rileva se vLLM e' utilizzabile (dopo l'installazione con pip il comando vllm e' nel PATH)"""
     cmd = target.engine_path or "vllm"
     if target.os == "windows":
-        # vLLM 不支持 Windows 原生，提示走 WSL2
+        # vLLM non supporta Windows in modo nativo, si suggerisce WSL2
         return {
             "installed": False, "engine": "vllm", "path": cmd, "version": "",
-            "reason": "vLLM 不支持 Windows 原生运行，请在 WSL2 (Linux) 中部署，或改用 llama.cpp",
+            "reason": "vLLM non supporta l'esecuzione nativa su Windows: distribuirlo in WSL2 (Linux) oppure usare llama.cpp",
             "windows_note": True,
         }
     result = executor.run(f"{cmd} --version 2>&1", timeout=25)
@@ -122,18 +122,18 @@ def _detect_vllm(executor: Executor, target: Target) -> dict:
                 break
     return {
         "installed": installed, "engine": "vllm", "path": cmd, "version": version,
-        "reason": "" if installed else "未检测到 vllm 命令，请先安装（pip install vllm）",
+        "reason": "" if installed else "Comando vllm non rilevato, installarlo prima (pip install vllm)",
     }
 
 
 def _detect_sglang(executor: Executor, target: Target) -> dict:
-    """检测 SGLang 是否可用（pip/uv 安装后 sglang 命令在 PATH）"""
+    """Rileva se SGLang e' utilizzabile (dopo l'installazione con pip/uv il comando sglang e' nel PATH)"""
     cmd = target.engine_path or "sglang"
     if target.os == "windows":
-        # SGLang 官方安装说明面向 Linux + NVIDIA GPU
+        # Le istruzioni ufficiali di installazione di SGLang riguardano Linux + GPU NVIDIA
         return {
             "installed": False, "engine": "sglang", "path": cmd, "version": "",
-            "reason": "SGLang 官方安装说明面向 Linux + NVIDIA GPU，请在 WSL2 (Linux) 中部署，或改用 llama.cpp",
+            "reason": "Le istruzioni ufficiali di installazione di SGLang riguardano Linux + GPU NVIDIA: distribuirlo in WSL2 (Linux) oppure usare llama.cpp",
             "windows_note": True,
         }
     result = executor.run(f"{cmd} --version 2>&1", timeout=25)
@@ -148,11 +148,11 @@ def _detect_sglang(executor: Executor, target: Target) -> dict:
                 break
     return {
         "installed": installed, "engine": "sglang", "path": cmd, "version": version,
-        "reason": "" if installed else "未检测到 sglang 命令，请先安装（pip install sglang，需 CUDA 环境）",
+        "reason": "" if installed else "Comando sglang non rilevato, installarlo prima (pip install sglang, richiede ambiente CUDA)",
     }
 
 
-# ==================== 安装任务管理 ====================
+# ==================== Gestione dei task di installazione ====================
 
 def _append_log(job_id: str, line: str):
     with _LOCK:
@@ -162,7 +162,7 @@ def _append_log(job_id: str, line: str):
 
 
 def _run_step(executor: Executor, job_id: str, cmd: str, desc: str, timeout: int = 600):
-    """执行一步并记录日志，返回 ExecResult"""
+    """Esegue un passo e ne registra il log, restituisce ExecResult"""
     _append_log(job_id, f"▶ {desc}")
     result = executor.run(cmd, timeout=timeout)
     for ln in (result.stdout or "").splitlines()[-5:]:
@@ -187,45 +187,101 @@ def list_jobs() -> List[dict]:
                  "target_id": j["target_id"]} for j in _JOBS.values()]
 
 
-# ==================== 各平台安装脚本 ====================
+# ==================== Scelta backend llama.cpp (v1.1.0, 2026-10-01) ====================
+# Valutazione ROCm vs Vulkan (dettagli in MANUAL / CONTEXT):
+#   - Vulkan: nessun SDK da installare (basta il driver grafico: Adrenalin su Windows,
+#     Mesa RADV su Linux); funziona su RDNA2/3/4 compresa RX 9070 XT (gfx1201). E' la
+#     scelta "funziona subito" e per la generazione token (tg) e' spesso alla pari con ROCm.
+#   - ROCm/HIP: di solito piu' veloce nel prompt processing (pp); su Windows il pacchetto
+#     precompilato "hip-radeon" porta con se' le DLL HIP; su Linux richiede ROCm >= 6.4
+#     installato (gfx1201 non e' supportato dalle versioni precedenti) e compilazione da sorgente.
+#   - Quindi: "auto" -> NVIDIA=cuda, AMD=vulkan (default sicuro), Apple=metal, altro=cpu;
+#     l'utente puo' forzare "rocm" da Impostazioni quando ROCm/HIP e' installato.
+
+LLAMA_BACKENDS = ("auto", "cuda", "rocm", "vulkan", "cpu")
+
+
+def resolve_llama_backend(executor: Executor, target: Target) -> str:
+    """Restituisce il backend effettivo (cuda/rocm/vulkan/metal/cpu) per questo target."""
+    choice = (getattr(target, "llama_backend", "auto") or "auto").lower()
+    if target.os == "macos":
+        return "metal"                      # brew installa gia' la build Metal
+    if choice in LLAMA_BACKENDS and choice != "auto":
+        return choice
+    from .collectors import _detect_gpu_static
+    try:
+        gpu = _detect_gpu_static(executor, target) or {}
+    except Exception:
+        gpu = {}
+    vendor = gpu.get("vendor", "")
+    if vendor == "nvidia":
+        return "cuda"
+    if vendor in ("amd", "intel"):
+        return "vulkan"
+    return "cpu"
+
+
+# Preferenze di asset nelle release GitHub di llama.cpp (Windows), in ordine di priorita'.
+# Si confrontano con i nomi reali: se nessuno combacia si elencano gli asset disponibili.
+_WIN_ASSET_PATTERNS = {
+    "cuda":   ["bin-win-cuda-12", "bin-win-cuda-cu12", "bin-win-cuda"],
+    "rocm":   ["bin-win-hip-radeon", "bin-win-hip"],
+    "vulkan": ["bin-win-vulkan"],
+    "cpu":    ["bin-win-cpu", "bin-win-avx2"],
+}
+
+
+# ==================== Script di installazione per piattaforma ====================
 
 def _install_windows(executor: Executor, job_id: str, target: Target) -> str:
-    """下载官方预编译 CUDA 包并解压，返回安装后的 engine_path"""
+    """Scarica il pacchetto precompilato ufficiale (secondo il backend scelto) e lo decomprime, restituisce l'engine_path dopo l'installazione"""
     install_dir = r"C:\llama"
     _run_step(executor, job_id,
               f'powershell -Command "New-Item -ItemType Directory -Force -Path {install_dir} | Out-Null"',
-              "创建安装目录 C:\\llama")
+              "Creazione della cartella di installazione C:\\llama")
 
-    # 获取最新 release 的 win-cuda 包下载地址
-    get_url_cmd = (
+    # [2026-10-01 v1.1.0] Il pacchetto dipende dal backend scelto (cuda/rocm/vulkan/cpu).
+    # Versione precedente (sostituita): scaricava SEMPRE il pacchetto CUDA, inutile su Radeon:
+    #   $a=$r.assets | Where-Object { $_.name -match 'bin-win-cuda-cu12' -and $_.name -match 'x64' } | Select-Object -First 1
+    backend = resolve_llama_backend(executor, target)
+    _append_log(job_id, f"▶ Backend llama.cpp selezionato: {backend.upper()} "
+                        f"(impostazione: {getattr(target, 'llama_backend', 'auto')})")
+    list_cmd = (
         'powershell -Command "'
         "$ProgressPreference='SilentlyContinue'; "
         "$r=Invoke-RestMethod -Uri 'https://api.github.com/repos/ggml-org/llama.cpp/releases/latest'; "
-        "$a=$r.assets | Where-Object { $_.name -match 'bin-win-cuda-cu12' -and $_.name -match 'x64' } | Select-Object -First 1; "
-        "Write-Output $a.browser_download_url\""
+        "$r.assets | ForEach-Object { Write-Output $_.browser_download_url }\""
     )
-    _append_log(job_id, "▶ 查询最新预编译包版本")
-    url_res = executor.run(get_url_cmd, timeout=60)
+    _append_log(job_id, "▶ Ricerca dell'ultima release precompilata")
+    list_res = executor.run(list_cmd, timeout=60)
+    urls = [ln.strip() for ln in list_res.stdout.splitlines() if ln.strip().startswith("http")]
     url = ""
-    for ln in url_res.stdout.splitlines():
-        if ln.strip().startswith("http"):
-            url = ln.strip()
+    for pat in _WIN_ASSET_PATTERNS.get(backend, []):
+        for u in urls:
+            name = u.rsplit("/", 1)[-1].lower()
+            if pat in name and "x64" in name and not name.startswith("cudart") and name.endswith(".zip"):
+                url = u
+                break
+        if url:
             break
     if not url:
-        raise RuntimeError("无法获取预编译包下载地址（请检查目标机网络或 GitHub 可访问性）")
-    _append_log(job_id, f"  下载源: {url}")
+        avail = ", ".join(u.rsplit("/", 1)[-1] for u in urls if "win" in u.lower()) or "nessuno"
+        raise RuntimeError(
+            f"Nessun pacchetto Windows per il backend {backend} nell'ultima release "
+            f"(rete/GitHub non raggiungibile?). Asset Windows disponibili: {avail}")
+    _append_log(job_id, f"  Sorgente download: {url}")
 
     zip_path = r"C:\llama\llama.zip"
     _run_step(executor, job_id,
               f'powershell -Command "$ProgressPreference=\'SilentlyContinue\'; '
               f'Invoke-WebRequest -Uri \'{url}\' -OutFile \'{zip_path}\'"',
-              "下载预编译包（可能较大，请稍候）", timeout=900)
+              "Download del pacchetto precompilato (puo' essere grande, attendere)", timeout=900)
 
     _run_step(executor, job_id,
               f'powershell -Command "Expand-Archive -Path \'{zip_path}\' -DestinationPath \'{install_dir}\' -Force"',
-              "解压安装包")
+              "Decompressione del pacchetto di installazione")
 
-    # 定位 llama-server.exe（解压后在子目录内）
+    # Individua llama-server.exe (dopo la decompressione si trova in una sottocartella)
     find_cmd = (
         f'powershell -Command "Get-ChildItem -Path {install_dir} -Recurse -Filter llama-server.exe '
         '| Select-Object -First 1 -ExpandProperty FullName"'
@@ -237,122 +293,150 @@ def _install_windows(executor: Executor, job_id: str, target: Target) -> str:
             exe_path = ln.strip()
             break
     if not exe_path:
-        raise RuntimeError("解压后未找到 llama-server.exe")
-    _append_log(job_id, f"  引擎路径: {exe_path}")
+        raise RuntimeError("llama-server.exe non trovato dopo la decompressione")
+    _append_log(job_id, f"  Percorso del motore: {exe_path}")
     return exe_path
 
 
 def _install_sglang(executor: Executor, job_id: str, target: Target) -> str:
-    """pip 安装 SGLang（仅 Linux/macOS，Windows 不支持原生运行）
+    """Installa SGLang con pip (solo Linux/macOS, Windows non supporta l'esecuzione nativa)
 
-    官方文档要求 Python 3.10+ 与 CUDA 环境，安装方式为 pip/uv
-    （uv pip install --prerelease=allow sglang，pip 等价）。
+    La documentazione ufficiale richiede Python 3.10+ e ambiente CUDA, l'installazione avviene con pip/uv
+    (uv pip install --prerelease=allow sglang, equivalente con pip).
     """
     if target.os == "windows":
         raise RuntimeError(
-            "SGLang 官方安装说明面向 Linux + NVIDIA GPU，请在 WSL2 (Linux) 中安装，或改用 llama.cpp")
+            "Le istruzioni ufficiali di installazione di SGLang riguardano Linux + GPU NVIDIA: installarlo in WSL2 (Linux) oppure usare llama.cpp")
 
     _run_step(executor, job_id, "command -v pip3 || command -v pip",
-              "检查 pip 是否可用", timeout=20)
+              "Verifica della disponibilita' di pip", timeout=20)
 
-    # 检测 CUDA / NVIDIA GPU（SGLang 主要面向 NVIDIA）
+    # Rileva CUDA / GPU NVIDIA (SGLang e' pensato soprattutto per NVIDIA)
     cuda = executor.run(
         "command -v nvcc && nvidia-smi --query-gpu=name --format=csv,noheader", timeout=15)
     if cuda.stdout.strip():
-        _append_log(job_id, f"  检测到 GPU/CUDA: {cuda.stdout.strip().splitlines()[0]}")
+        _append_log(job_id, f"  GPU/CUDA rilevata: {cuda.stdout.strip().splitlines()[0]}")
     else:
-        _append_log(job_id, "  未检测到 CUDA，SGLang 需要 NVIDIA GPU 环境，安装后可能无法正常运行")
+        _append_log(job_id, "  CUDA non rilevato: SGLang richiede un ambiente con GPU NVIDIA, dopo l'installazione potrebbe non funzionare correttamente")
 
     _run_step(executor, job_id,
               "pip3 install -U sglang 2>&1 | tail -20 || pip install -U sglang 2>&1 | tail -20",
-              "pip 安装 SGLang（体积较大、耗时较长，请稍候）", timeout=3600)
+              "Installazione di SGLang con pip (pacchetto grande e lungo, attendere)", timeout=3600)
 
     fr = executor.run("command -v sglang")
     exe_path = fr.stdout.strip().splitlines()[-1] if fr.stdout.strip() else ""
     if not exe_path:
-        raise RuntimeError("安装完成但未找到 sglang 命令，请检查 pip 输出或 PATH")
-    _append_log(job_id, f"  引擎路径: {exe_path}")
+        raise RuntimeError("Installazione completata ma comando sglang non trovato, controllare l'output di pip o il PATH")
+    _append_log(job_id, f"  Percorso del motore: {exe_path}")
     return exe_path
 
 
 def _install_macos(executor: Executor, job_id: str, target: Target) -> str:
-    """Homebrew 安装 llama.cpp"""
-    # 检查 brew
+    """Installa llama.cpp con Homebrew"""
+    # Verifica brew
     brew_check = executor.run("command -v brew")
     if not brew_check.stdout:
-        raise RuntimeError("目标机未安装 Homebrew，请先安装 brew (https://brew.sh) 后重试")
+        raise RuntimeError("Homebrew non installato sulla macchina target: installare prima brew (https://brew.sh) e riprovare")
 
-    _run_step(executor, job_id, "brew install llama.cpp", "通过 Homebrew 安装 llama.cpp", timeout=1200)
+    _run_step(executor, job_id, "brew install llama.cpp", "Installazione di llama.cpp con Homebrew", timeout=1200)
 
-    # 定位可执行文件
+    # Individua l'eseguibile
     fr = executor.run("command -v llama-server")
     exe_path = fr.stdout.strip().splitlines()[-1] if fr.stdout.strip() else ""
     if not exe_path:
-        raise RuntimeError("安装完成但未找到 llama-server，请检查 brew 输出")
-    _append_log(job_id, f"  引擎路径: {exe_path}")
+        raise RuntimeError("Installazione completata ma llama-server non trovato, controllare l'output di brew")
+    _append_log(job_id, f"  Percorso del motore: {exe_path}")
     return exe_path
 
 
 def _install_linux(executor: Executor, job_id: str, target: Target) -> str:
-    """源码编译 llama.cpp（启用 CUDA 若可用）"""
+    """Compila llama.cpp dai sorgenti (CUDA / ROCm / Vulkan / CPU secondo il backend scelto)"""
     _run_step(executor, job_id,
               "command -v cmake && command -v git && command -v g++",
-              "检查编译依赖 (cmake/git/g++)", timeout=30)
+              "Verifica delle dipendenze di compilazione (cmake/git/g++)", timeout=30)
 
     build_dir = "/tmp/llama.cpp"
     _run_step(executor, job_id,
               f"rm -rf {build_dir} && git clone --depth 1 https://github.com/ggml-org/llama.cpp {build_dir}",
-              "克隆 llama.cpp 源码", timeout=600)
+              "Clonazione dei sorgenti di llama.cpp", timeout=600)
 
-    # 检测是否有 CUDA
-    cuda = executor.run("command -v nvcc")
-    cmake_flag = "-DGGML_CUDA=ON" if cuda.stdout else ""
+    # [2026-10-01 v1.1.0] Backend scelto (cuda/rocm/vulkan/cpu) -> flag cmake / variabili ambiente.
+    # Versione precedente (sostituita): solo CUDA se nvcc presente, altrimenti CPU:
+    #   cuda = executor.run("command -v nvcc"); cmake_flag = "-DGGML_CUDA=ON" if cuda.stdout else ""
+    backend = resolve_llama_backend(executor, target)
+    _append_log(job_id, f"▶ Backend llama.cpp selezionato: {backend.upper()} "
+                        f"(impostazione: {getattr(target, 'llama_backend', 'auto')})")
+    env_prefix = ""
+    if backend == "cuda":
+        if not executor.run("command -v nvcc").stdout:
+            raise RuntimeError("Backend CUDA richiesto ma nvcc non trovato: installare il CUDA Toolkit "
+                               "oppure scegliere Vulkan/CPU nelle Impostazioni")
+        cmake_flag = "-DGGML_CUDA=ON"
+    elif backend == "vulkan":
+        # Servono libvulkan-dev e glslc (pacchetti: libvulkan-dev, glslc / shaderc / vulkan-sdk)
+        if not executor.run("command -v glslc").stdout:
+            raise RuntimeError("Backend Vulkan: compilatore shader 'glslc' non trovato. Installare "
+                               "libvulkan-dev e glslc (Debian/Ubuntu: apt install libvulkan-dev glslc)")
+        cmake_flag = "-DGGML_VULKAN=ON"
+    elif backend == "rocm":
+        hip = executor.run("command -v hipconfig")
+        if not hip.stdout:
+            raise RuntimeError("Backend ROCm: hipconfig non trovato. Installare ROCm >= 6.4 "
+                               "(necessario per RX 9070 XT / gfx1201) oppure scegliere Vulkan")
+        # Architettura GPU: es. gfx1201 per RX 9070 XT; se non rilevabile lascia decidere a cmake
+        gfx = executor.run("rocminfo 2>/dev/null | grep -m1 -o 'gfx[0-9a-f]\\+'").stdout.strip()
+        _append_log(job_id, f"  Architettura GPU rilevata: {gfx or 'non rilevata (uso default cmake)'}")
+        env_prefix = 'HIPCXX="$(hipconfig -l)/clang" HIP_PATH="$(hipconfig -R)" '
+        cmake_flag = "-DGGML_HIP=ON" + (f" -DAMDGPU_TARGETS={gfx}" if gfx else "")
+    else:
+        cmake_flag = ""
     _run_step(executor, job_id,
-              f"cd {build_dir} && cmake -B build {cmake_flag} && cmake --build build --config Release -j --target llama-server",
-              "编译 llama-server" + ("（CUDA）" if cmake_flag else "（CPU）"), timeout=2400)
+              f"cd {build_dir} && {env_prefix}cmake -B build {cmake_flag} -DCMAKE_BUILD_TYPE=Release "
+              f"&& cmake --build build --config Release -j --target llama-server",
+              "Compilazione di llama-server" + f" ({backend.upper()})", timeout=2400)
 
     exe_path = f"{build_dir}/build/bin/llama-server"
     check = executor.run(f'test -f "{exe_path}" && echo FOUND')
     if "FOUND" not in check.stdout:
-        raise RuntimeError("编译完成但未生成 llama-server")
-    _append_log(job_id, f"  引擎路径: {exe_path}")
+        raise RuntimeError("Compilazione terminata ma llama-server non e' stato generato")
+    _append_log(job_id, f"  Percorso del motore: {exe_path}")
     return exe_path
 
 
 def _install_vllm(executor: Executor, job_id: str, target: Target) -> str:
-    """pip 安装 vLLM（仅 Linux/macOS，Windows 不支持原生运行）"""
+    """Installa vLLM con pip (solo Linux/macOS, Windows non supporta l'esecuzione nativa)"""
     if target.os == "windows":
         raise RuntimeError(
-            "vLLM 不支持 Windows 原生运行，请在 WSL2 (Linux) 中安装，或改用 llama.cpp")
+            "vLLM non supporta l'esecuzione nativa su Windows: installarlo in WSL2 (Linux) oppure usare llama.cpp")
 
     _run_step(executor, job_id, "command -v pip3 || command -v pip",
-              "检查 pip 是否可用", timeout=20)
+              "Verifica della disponibilita' di pip", timeout=20)
 
-    # 检测 CUDA / NVIDIA GPU（vLLM 主要面向 NVIDIA）
+    # Rileva CUDA / GPU NVIDIA (vLLM e' pensato soprattutto per NVIDIA)
     cuda = executor.run(
         "command -v nvcc && nvidia-smi --query-gpu=name --format=csv,noheader", timeout=15)
     if cuda.stdout.strip():
-        _append_log(job_id, f"  检测到 GPU/CUDA: {cuda.stdout.strip().splitlines()[0]}")
+        _append_log(job_id, f"  GPU/CUDA rilevata: {cuda.stdout.strip().splitlines()[0]}")
     else:
-        _append_log(job_id, "  未检测到 CUDA，vLLM 主要面向 NVIDIA GPU，安装后可能无法正常运行")
+        _append_log(job_id, "  CUDA non rilevato: vLLM e' pensato soprattutto per GPU NVIDIA, dopo l'installazione potrebbe non funzionare correttamente")
 
     _run_step(executor, job_id,
               "pip3 install -U vllm 2>&1 | tail -20 || pip install -U vllm 2>&1 | tail -20",
-              "pip 安装 vLLM（体积较大、耗时较长，请稍候）", timeout=3600)
+              "Installazione di vLLM con pip (pacchetto grande e lungo, attendere)", timeout=3600)
 
     fr = executor.run("command -v vllm")
     exe_path = fr.stdout.strip().splitlines()[-1] if fr.stdout.strip() else ""
     if not exe_path:
-        raise RuntimeError("安装完成但未找到 vllm 命令，请检查 pip 输出或 PATH")
-    _append_log(job_id, f"  引擎路径: {exe_path}")
+        raise RuntimeError("Installazione completata ma comando vllm non trovato, controllare l'output di pip o il PATH")
+    _append_log(job_id, f"  Percorso del motore: {exe_path}")
     return exe_path
 
 
 def _install_comfyui(executor: Executor, job_id: str, target: Target) -> str:
-    """git clone ComfyUI + pip 安装依赖。返回安装根目录（作为 engine_path 回填）。
+    """git clone di ComfyUI + installazione delle dipendenze con pip. Restituisce la cartella radice di installazione (riportata in engine_path).
 
-    安装目录：优先用用户已配置的 engine_path 作为目标目录，否则用通用默认位置
-    （Windows: C:\\ComfyUI，类 Unix: ~/ComfyUI）。不写死任何个人机器路径。"""
+    Cartella di installazione: ha priorita' l'engine_path gia' configurato dall'utente come cartella di destinazione, altrimenti una posizione di default generica
+    (Windows: C:\\ComfyUI, tipo Unix: ~/ComfyUI). Nessun percorso di macchine personali cablato nel codice."""
     if target.engine_path:
         install_dir = target.engine_path
     elif target.os == "windows":
@@ -362,53 +446,53 @@ def _install_comfyui(executor: Executor, job_id: str, target: Target) -> str:
 
     repo = "https://github.com/comfyanonymous/ComfyUI.git"
 
-    # 1) 检查 git / python / pip
+    # 1) Verifica di git / python / pip
     _run_step(executor, job_id,
               "git --version && (python --version || python3 --version)",
-              "检查 git 与 python", timeout=30)
+              "Verifica di git e python", timeout=30)
 
-    # 2) 克隆（若目录已存在则跳过克隆，仅更新）
+    # 2) Clonazione (se la cartella esiste gia' salta la clonazione, aggiorna soltanto)
     if target.os == "windows":
         exist = executor.run(f'if exist "{install_dir}\\main.py" (echo FOUND)').stdout
         if "FOUND" in exist:
-            _append_log(job_id, "  检测到已存在 ComfyUI，跳过克隆")
+            _append_log(job_id, "  ComfyUI gia' presente, clonazione saltata")
         else:
             _run_step(executor, job_id,
                       f'git clone --depth 1 {repo} "{install_dir}"',
-                      "克隆 ComfyUI 仓库", timeout=900)
+                      "Clonazione del repository di ComfyUI", timeout=900)
     else:
         exist = executor.run(f'test -f {install_dir}/main.py && echo FOUND').stdout
         if "FOUND" in exist:
-            _append_log(job_id, "  检测到已存在 ComfyUI，跳过克隆")
+            _append_log(job_id, "  ComfyUI gia' presente, clonazione saltata")
         else:
             _run_step(executor, job_id,
                       f"git clone --depth 1 {repo} {install_dir}",
-                      "克隆 ComfyUI 仓库", timeout=900)
+                      "Clonazione del repository di ComfyUI", timeout=900)
 
-    # 3) pip 安装依赖（torch 等大依赖，耗时较长）
+    # 3) Installazione delle dipendenze con pip (dipendenze grandi come torch, richiede tempo)
     py = "python" if target.os == "windows" else "python3"
     req = _join(install_dir, "requirements.txt") if target.os == "windows" else f"{install_dir.rstrip('/')}/requirements.txt"
     _run_step(executor, job_id,
               f'cd "{install_dir}" && {py} -m pip install -r "{req}" 2>&1 | tail -20'
               if target.os == "windows" else
               f"cd {install_dir} && {py} -m pip install -r requirements.txt 2>&1 | tail -20",
-              "pip 安装 ComfyUI 依赖（含 PyTorch，体积大、耗时长，请稍候）", timeout=3600)
+              "Installazione delle dipendenze di ComfyUI con pip (include PyTorch, pacchetto grande e lungo, attendere)", timeout=3600)
 
-    # 4) 校验入口
+    # 4) Verifica del punto di ingresso
     if target.os == "windows":
         chk = executor.run(f'if exist "{install_dir}\\main.py" (echo FOUND)')
     else:
         chk = executor.run(f'test -f {install_dir}/main.py && echo FOUND')
     if "FOUND" not in chk.stdout:
-        raise RuntimeError("安装完成但未找到 ComfyUI main.py，请检查克隆/网络")
-    _append_log(job_id, f"  ComfyUI 目录: {install_dir}")
+        raise RuntimeError("Installazione completata ma main.py di ComfyUI non trovato, controllare clonazione/rete")
+    _append_log(job_id, f"  Cartella di ComfyUI: {install_dir}")
     return install_dir
 
 
-# ==================== 后台执行 ====================
+# ==================== Esecuzione in background ====================
 
 def start_install(target: Target) -> str:
-    """启动安装任务，返回 job_id"""
+    """Avvia il task di installazione, restituisce job_id"""
     job_id = uuid.uuid4().hex[:8]
     with _LOCK:
         _JOBS[job_id] = {
@@ -427,16 +511,16 @@ def start_install(target: Target) -> str:
             executor = make_executor(target)
             engine_type = getattr(target, "engine_type", "llama_cpp") or "llama_cpp"
             if engine_type == "vllm":
-                _append_log(job_id, f"开始为「{target.name}」({target.os}) 安装 vLLM")
+                _append_log(job_id, f"Avvio dell'installazione di vLLM per «{target.name}» ({target.os})")
                 exe = _install_vllm(executor, job_id, target)
             elif engine_type == "sglang":
-                _append_log(job_id, f"开始为「{target.name}」({target.os}) 安装 SGLang")
+                _append_log(job_id, f"Avvio dell'installazione di SGLang per «{target.name}» ({target.os})")
                 exe = _install_sglang(executor, job_id, target)
             elif engine_type == "comfyui":
-                _append_log(job_id, f"开始为「{target.name}」({target.os}) 安装 ComfyUI")
+                _append_log(job_id, f"Avvio dell'installazione di ComfyUI per «{target.name}» ({target.os})")
                 exe = _install_comfyui(executor, job_id, target)
             else:
-                _append_log(job_id, f"开始为「{target.name}」({target.os}) 安装 llama.cpp")
+                _append_log(job_id, f"Avvio dell'installazione di llama.cpp per «{target.name}» ({target.os})")
                 if target.os == "windows":
                     exe = _install_windows(executor, job_id, target)
                 elif target.os == "macos":
@@ -444,7 +528,7 @@ def start_install(target: Target) -> str:
                 else:
                     exe = _install_linux(executor, job_id, target)
 
-            # 回填 engine_path 到配置
+            # Riporta engine_path nella configurazione
             target.engine_path = exe
             from ..models.target import upsert_target
             upsert_target(target)
@@ -453,13 +537,13 @@ def start_install(target: Target) -> str:
                 job = _JOBS[job_id]
                 job["status"] = "success"
                 job["engine_path"] = exe
-            _append_log(job_id, "✓ 安装完成，引擎路径已自动回填到配置")
+            _append_log(job_id, "✓ Installazione completata, percorso del motore riportato automaticamente nella configurazione")
         except Exception as e:
             with _LOCK:
                 job = _JOBS[job_id]
                 job["status"] = "failed"
                 job["error"] = str(e)
-            _append_log(job_id, f"✗ 安装失败: {e}")
+            _append_log(job_id, f"✗ Installazione non riuscita: {e}")
         finally:
             if executor:
                 executor.close()

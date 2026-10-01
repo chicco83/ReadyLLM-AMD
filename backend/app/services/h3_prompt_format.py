@@ -1,29 +1,30 @@
-"""H3 官方提示词格式拼装器（单一事实来源）。
+"""Assemblatore del formato ufficiale dei prompt H3 (unica fonte di verita').
 
-依据 MiniMax-H3 官方 skill：.agents/skills/h3-prompt-writing/
-  - references/base-en.txt（T2VA / I2VA：三核心字段）
-  - references/ref-en.txt（Ref2VA：六段式）
+Secondo la skill ufficiale MiniMax-H3: .agents/skills/h3-prompt-writing/
+  - references/base-en.txt (T2VA / I2VA: tre campi principali)
+  - references/ref-en.txt (Ref2VA: sei sezioni)
 
-设计原则：LLM 只负责填「语义内容」（主体外观、动作、运镜、声音等），
-本模块负责把这些内容按官方固定字段名、固定顺序、固定句式拼装成最终
-prompt 字符串。格式正确性由代码保证，不依赖 LLM 每次记对模板。
+Principio di progetto: l'LLM compila solo il «contenuto semantico» (aspetto del soggetto, azione, movimento di camera, suono ecc.),
+questo modulo assembla quei contenuti nella stringa finale del
+prompt con i nomi di campo, l'ordine e le formule fissi ufficiali. La correttezza del formato e' garantita dal codice, senza dipendere dal fatto che l'LLM ricordi
+ogni volta il template giusto.
 
-三种模式：
-  t2v  纯文生视频：integrated_multimodal_description + overall_soundscape + non_diegetic_music
-  i2v  图生视频：上面三字段 + 首行 I2VA 对齐指令（固定句式）
-  r2v  参考图生视频：六段式 subject_definitions/summary/retention_analysis/
+Tre modalita':
+  t2v  puro text-to-video: integrated_multimodal_description + overall_soundscape + non_diegetic_music
+  i2v  image-to-video: i tre campi precedenti + istruzione di allineamento I2VA sulla prima riga (formula fissa)
+  r2v  reference-to-video: sei sezioni subject_definitions/summary/retention_analysis/
        detailed_description/overall_soundscape/non_diegetic_music
 
-我们每段视频是独立生成的短视频，detailed_description 内只放单个 [Shot 1]
-（首镜头不加时间戳，符合官方「first shot 不加 timestamp」规则）。多镜头时间戳
-留给未来单段内多 shot 的场景。
+Ogni nostro segmento video e' un breve video generato in modo indipendente, in detailed_description si mette solo un singolo [Shot 1]
+(la prima inquadratura senza timestamp, conforme alla regola ufficiale «il first shot non porta timestamp»). I timestamp multi-shot
+sono riservati a futuri scenari con piu' shot nello stesso segmento.
 """
 
 from typing import Dict, Any, List
 
 
 def _shot_body(shot1: str) -> str:
-    """把 shot 内容规整为 [Shot 1] 开头声明风格的正文。"""
+    """Riordina il contenuto dello shot in un testo che inizia con la dichiarazione di stile [Shot 1]."""
     s = (shot1 or "").strip()
     if s.lower().startswith("[shot 1]"):
         return s
@@ -41,8 +42,8 @@ def _ref_phrase(refs: List[str]) -> str:
 
 
 def compose_ref_prompt(data: Dict[str, Any]) -> str:
-    """R2V（Ref2VA）六段式。data 需含 subjects/summary/retention/shot1/
-    soundscape/music。缺字段则跳过该段，保证不崩。"""
+    """R2V (Ref2VA) in sei sezioni. data deve contenere subjects/summary/retention/shot1/
+    soundscape/music. Se manca un campo si salta quella sezione, per garantire che non si blocchi."""
     subjects = data.get("subjects") or []
     retention = data.get("retention") or []
     parts: List[str] = []
@@ -80,8 +81,8 @@ def compose_ref_prompt(data: Dict[str, Any]) -> str:
             if not name:
                 continue
             preserved = str(r.get("preserved", "")).strip()
-            # LLM 有时把 "fully_preserved" 写进 preserved 字段本身，与下面模板
-            # 的 "fully_preserved - " 前缀重复，剥掉它保证只出现一次。
+            # A volte l'LLM scrive «fully_preserved» nel campo preserved stesso, duplicando
+            # il prefisso «fully_preserved - » del template sotto: lo si toglie, cosi' compare una sola volta.
             if preserved.lower().startswith("fully_preserved"):
                 preserved = preserved[len("fully_preserved"):].lstrip(" -–:：").strip()
             rlines.append("<%s> (appears in [Shot 1]): fully_preserved - %s"
@@ -108,10 +109,10 @@ def compose_ref_prompt(data: Dict[str, Any]) -> str:
 
 def compose_base_prompt(data: Dict[str, Any], mode: str = "t2v",
                         picture_count: int = 1) -> str:
-    """T2VA / I2VA 三核心字段。mode=i2v 时首行加固定对齐指令。"""
+    """Tre campi principali di T2VA / I2VA. Con mode=i2v sulla prima riga si aggiunge l'istruzione di allineamento fissa."""
     parts: List[str] = []
 
-    # I2VA 对齐指令行（官方固定句式）
+    # Riga dell'istruzione di allineamento I2VA (formula fissa ufficiale)
     if mode == "i2v":
         parts.append(
             "For the target video, at 0.00 seconds into the target video, "
@@ -133,14 +134,14 @@ def compose_base_prompt(data: Dict[str, Any], mode: str = "t2v",
 
 def compose_prompt(data: Dict[str, Any], mode: str = "t2v",
                    picture_count: int = 1) -> str:
-    """按模式分派。mode ∈ {t2v, i2v, r2v}。"""
+    """Smistamento per modalita'. mode in {t2v, i2v, r2v}."""
     if mode == "r2v":
         return compose_ref_prompt(data)
     return compose_base_prompt(data, mode=mode, picture_count=picture_count)
 
 
 if __name__ == "__main__":
-    # 自测：拼装输出应符合官方六段式结构
+    # Autotest: l'output assemblato deve rispettare la struttura ufficiale in sei sezioni
     d = {
         "subjects": [{"name": "Subject 1",
                       "refs": ["Picture 1", "Picture 2"],
@@ -157,9 +158,9 @@ if __name__ == "__main__":
         "soundscape": "Gentle lapping of canal water and soft fabric rustling.",
         "music": "A restrained solo guqin melody at a slow tempo.",
     }
-    print("===== R2V 六段式 =====")
+    print("===== R2V in sei sezioni =====")
     print(compose_ref_prompt(d))
-    print("\n===== I2V 三字段 =====")
+    print("\n===== I2V tre campi =====")
     print(compose_base_prompt({"shot1": d["shot1"],
                                "soundscape": d["soundscape"],
                                "music": d["music"]}, mode="i2v"))

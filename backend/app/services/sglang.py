@@ -1,30 +1,30 @@
-"""SGLang 引擎适配器
+"""Adattatore del motore SGLang
 
-SGLang 是高吞吐推理框架，通过 `sglang serve <model>` 启动 OpenAI 兼容服务。
-与 llama.cpp / vLLM 的关键差异（依据官方文档 docs.sglang.io）：
-  - 模型格式：HuggingFace 权重（HF model id 或本地权重目录），不是 GGUF
-  - 启动命令：模型是位置参数，形如 `sglang serve MODEL --host 0.0.0.0 --port 30000`
-  - 指标：默认不暴露，必须带 --enable-metrics 启动才有 /metrics
-    （Prometheus 文本，指标前缀 sglang:，且带 model_name 标签）
-  - 平台：官方安装说明面向 Linux + NVIDIA GPU，Windows 需 WSL2
+SGLang e' un framework di inferenza ad alto throughput, avvia un servizio compatibile OpenAI con `sglang serve <model>`.
+Differenze chiave rispetto a llama.cpp / vLLM (dalla documentazione ufficiale docs.sglang.io):
+  - Formato dei modelli: pesi HuggingFace (ID modello HF o cartella dei pesi locali), non GGUF
+  - Comando di avvio: il modello e' un argomento posizionale, ad es. `sglang serve MODEL --host 0.0.0.0 --port 30000`
+  - Metriche: non esposte di default, /metrics esiste solo se si avvia con --enable-metrics
+    (testo Prometheus, prefisso delle metriche sglang:, con etichetta model_name)
+  - Piattaforma: le istruzioni ufficiali di installazione riguardano Linux + GPU NVIDIA, su Windows serve WSL2
 
-所有命令基于用户配置的 Target 执行，不硬编码任何环境。
+Tutti i comandi operano sul Target configurato dall'utente, senza alcun ambiente cablato nel codice.
 """
 
 from .engine_adapter import EngineAdapter, StartParams
 from .executor import Executor
 from ..models.target import Target
 
-# SGLang 默认推荐启动参数（通用，不含任何特定机器/模型）
-# --enable-metrics 是监控采集的前提：缺少它 /metrics 不会暴露指标
+# Parametri di avvio consigliati di default per SGLang (generici, senza alcuna macchina/modello specifico)
+# --enable-metrics e' il presupposto della raccolta di monitoraggio: senza, /metrics non espone le metriche
 DEFAULT_ARGS = [
     "--host", "0.0.0.0",
     "--enable-metrics",
 ]
 
 WSL2_HINT = (
-    "SGLang 官方安装说明面向 Linux + NVIDIA GPU。请在 WSL2 (Ubuntu) 中安装并运行，"
-    "或将目标机引擎类型改为 llama.cpp。"
+    "Le istruzioni ufficiali di installazione di SGLang riguardano Linux + GPU NVIDIA. Installarlo ed eseguirlo in WSL2 (Ubuntu), "
+    "oppure cambiare il tipo di motore della macchina target in llama.cpp."
 )
 
 
@@ -37,14 +37,14 @@ class SGLangAdapter(EngineAdapter):
         return "sglang"
 
     def _sglang_cmd(self) -> str:
-        """sglang 可执行命令：优先用户配置的 engine_path，否则默认 PATH 中的 sglang"""
+        """Comando eseguibile di sglang: ha priorita' l'engine_path configurato dall'utente, altrimenti sglang nel PATH di default"""
         return self.target.engine_path or "sglang"
 
-    # ==================== 检测 ====================
+    # ==================== Rilevamento ====================
 
     def check_installed(self) -> bool:
         if self.target.os == "windows":
-            # Windows 原生不支持 SGLang
+            # Windows nativo non supporta SGLang
             return False
         result = self.executor.run(f"{self._sglang_cmd()} --version 2>&1", timeout=25)
         out = (result.stdout or "").lower()
@@ -52,40 +52,40 @@ class SGLangAdapter(EngineAdapter):
             return False
         return bool(result.ok and ("sglang" in out or any(c.isdigit() for c in out)))
 
-    # ==================== 启动 / 停止 ====================
+    # ==================== Avvio / Arresto ====================
 
     def start(self, params: StartParams) -> tuple[bool, str]:
         if self.target.os == "windows":
             return False, WSL2_HINT
 
         args = list(params.extra_args) if params.extra_args else list(DEFAULT_ARGS)
-        # 监控数据依赖 --enable-metrics，用户自定义参数里没给就补上
+        # Il monitoraggio dipende da --enable-metrics: se i parametri personalizzati dell'utente non lo includono, lo si aggiunge
         if "--enable-metrics" not in args:
             args = args + ["--enable-metrics"]
-        # 注入端口（sglang serve 用 --port）
+        # Inietta la porta (sglang serve usa --port)
         if "--port" not in args:
             args = args + ["--port", str(self.target.service_port)]
         args_str = " ".join(args)
 
-        # model_path 对 SGLang 而言是 HF 模型 id 或本地权重目录（位置参数）
+        # Per SGLang model_path e' un ID modello HF o una cartella di pesi locali (argomento posizionale)
         model = params.model_path
         cmd = f'{self._sglang_cmd()} serve "{model}" {args_str}'
 
-        # 后台启动，日志落盘
+        # Avvio in background, log su disco
         run_cmd = f"nohup {cmd} > /tmp/sglang_server.log 2>&1 &"
         result = self.executor.run(run_cmd, timeout=20)
         if not result.ok:
-            return False, f"启动失败: {result.stdout} {result.stderr}"
-        return True, "SGLang 启动命令已发送（首次加载模型需下载权重，请耐心等待）"
+            return False, f"Avvio non riuscito: {result.stdout} {result.stderr}"
+        return True, "Comando di avvio di SGLang inviato (al primo caricamento del modello occorre scaricare i pesi, attendere con pazienza)"
 
     def stop(self) -> tuple[bool, str]:
         if self.target.os == "windows":
             return False, WSL2_HINT
-        # sglang serve 会派生 scheduler / detokenizer 子进程，按名匹配一并结束
+        # sglang serve genera sottoprocessi scheduler / detokenizer, si terminano insieme cercandoli per nome
         result = self.executor.run("pkill -f 'sglang'", timeout=10)
         if result.ok:
-            return True, "SGLang 服务已停止"
-        return False, f"停止结果: {result.stdout} {result.stderr}"
+            return True, "Servizio SGLang fermato"
+        return False, f"Esito dell'arresto: {result.stdout} {result.stderr}"
 
     def is_running(self) -> bool:
         if self.target.os == "windows":
@@ -93,8 +93,8 @@ class SGLangAdapter(EngineAdapter):
         result = self.executor.run("pgrep -f 'sglang'")
         return bool(result.stdout.strip())
 
-    # ==================== 监控 ====================
+    # ==================== Monitoraggio ====================
 
     def get_metrics_url(self) -> str:
-        # SGLang 在 --port 暴露 /metrics（需以 --enable-metrics 启动）
+        # SGLang espone /metrics sulla --port (richiede l'avvio con --enable-metrics)
         return f"http://127.0.0.1:{self.target.service_port}/metrics"

@@ -1,6 +1,6 @@
-"""AI Agent 调优 API
+"""API di tuning con AI Agent
 
-配置管理 + 启动 Agent 调优任务 + 轮询进度。
+Gestione della configurazione + avvio del task di tuning dell'Agent + polling dell'avanzamento.
 """
 
 from fastapi import APIRouter
@@ -23,12 +23,12 @@ class AITuneRequest(BaseModel):
     model: str
     ctx_size: int = 8192
     goal: str = "latency"       # latency | throughput | prefill
-    user_desc: str = ""         # 用户场景描述（可选）
+    user_desc: str = ""         # descrizione dello scenario d'uso (facoltativa)
 
 
 @router.get("/config")
 def get_config():
-    """获取 AI 配置（api_key 脱敏）"""
+    """Restituisce la configurazione AI (api_key mascherata)"""
     cfg = ai_tuner.get_config()
     masked = dict(cfg)
     if masked.get("api_key"):
@@ -39,20 +39,20 @@ def get_config():
 
 @router.put("/config")
 def put_config(req: AIConfigRequest):
-    """保存 AI 配置。
+    """Salva la configurazione AI.
 
-    防御「脱敏回显 + 全量覆盖」陷阱：get_config 返回的 api_key 是脱敏串
-    （如 sk-w***LXcQ），前端会把它回填进表单。若用户只改了 url/model、
-    没动 key 就提交，表单里的脱敏串会覆盖掉文件中的真实 key。
-    因此当提交的 api_key 为空、含脱敏标记 *** 或与当前脱敏值一致时，
-    保留文件里已有的真实 key，绝不用密文覆盖。
-    """
+    Evita la trappola «eco mascherato + sovrascrittura totale»: la api_key restituita da get_config
+    e' una stringa mascherata (es. sk-w***LXcQ) che il frontend rimette nel form. Se l'utente
+    modifica solo url/model senza toccare la chiave e invia, la stringa mascherata
+    sovrascriverebbe la chiave reale nel file.
+    Per questo, quando la api_key inviata e' vuota, contiene il marcatore *** o coincide col valore
+    mascherato attuale, si conserva la chiave reale gia' presente nel file, senza mai sovrascriverla."""
     existing = ai_tuner.get_config()
     real_key = existing.get("api_key", "")
     masked = (real_key[:4] + "***" + real_key[-4:]) if len(real_key) > 8 else "***"
     new_key = req.api_key
     if not new_key or new_key == masked or "***" in new_key:
-        new_key = real_key  # 用户没真正改 key，保留原值
+        new_key = real_key  # l'utente non ha cambiato la chiave davvero, si mantiene il valore originale
     ai_tuner.save_config({
         "api_url": req.api_url,
         "api_key": new_key,
@@ -63,7 +63,7 @@ def put_config(req: AIConfigRequest):
 
 @router.post("/test-connection")
 def test_connection(req: AIConfigRequest):
-    """测试 LLM API 连通性"""
+    """Verifica la connettivita' dell'API LLM"""
     return ai_tuner.test_connection({
         "api_url": req.api_url,
         "api_key": req.api_key,
@@ -73,7 +73,7 @@ def test_connection(req: AIConfigRequest):
 
 @router.post("/start")
 def start(req: AITuneRequest):
-    """启动 AI Agent 调优任务"""
+    """Avvia il task di tuning con AI Agent"""
     return ai_tuner.start_ai_tune(
         req.target_id, req.model, req.ctx_size, req.goal, req.user_desc,
     )
@@ -81,7 +81,7 @@ def start(req: AITuneRequest):
 
 @router.get("/status/{job_id}")
 def status(job_id: str):
-    """查询 AI 调优进度与结果"""
+    """Interroga avanzamento e risultato del tuning AI"""
     job = ai_tuner.get_job(job_id)
     if not job:
         return {"status": "not_found", "logs": [], "rounds": []}
@@ -90,7 +90,7 @@ def status(job_id: str):
 
 @router.get("/active")
 def active(target_id: str):
-    """返回该目标机正在运行的 AI 调优任务，供前端刷新后恢复轮询"""
+    """Restituisce il task di tuning AI in corso sulla macchina target, per riprendere il polling dopo un refresh del frontend"""
     return {"jobs": ai_tuner.list_active_jobs(target_id)}
 
 
@@ -98,19 +98,19 @@ def active(target_id: str):
 class SaveTuneRequest(BaseModel):
     target_id: str
     model: str
-    ctx_size: int                        # 固定上下文长度，随参数一并保存
-    params: Dict[str, str]               # 最优参数（扁平字典，不含 ctx-size）
+    ctx_size: int                        # lunghezza di contesto fissa, salvata insieme ai parametri
+    params: Dict[str, str]               # parametri ottimali (dizionario piatto, senza ctx-size)
     score: float = 0.0
 
 
 @router.post("/save")
 def save(req: SaveTuneRequest):
-    """把 AI 调优的最终推荐参数（含固定 ctx_size）保存到该模型，
-    作为部署页 default-args 的回填来源。用户在结果界面点「保存并应用」时调用。"""
+    """Salva sul modello i parametri finali raccomandati dal tuning AI (incluso ctx_size fisso),
+    come sorgente per precompilare i default-args della pagina Deploy. Chiamata quando l'utente clicca «Salva e applica» nella schermata dei risultati."""
     if not req.params:
-        return {"ok": False, "message": "无参数可保存"}
+        return {"ok": False, "message": "Nessun parametro da salvare"}
     tune_history.save_latest(
         req.target_id, req.model, req.ctx_size, req.params,
         source="ai_tuner", score=req.score,
     )
-    return {"ok": True, "message": f"已保存到 {req.model} 的部署参数（含 ctx={req.ctx_size}）"}
+    return {"ok": True, "message": f"Salvato nei parametri di deploy di {req.model} (con ctx={req.ctx_size})"}

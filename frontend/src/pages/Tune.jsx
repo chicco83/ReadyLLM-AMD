@@ -3,7 +3,7 @@ import ProgressPanel from '../components/ProgressPanel'
 import { IconAlert, IconStar, IconCheck, IconX, IconBot } from '../components/Icons'
 import { useI18n } from '../i18n/I18nContext'
 
-// ==================== 自动调优 ====================
+// ==================== Tuning automatico ====================
 
 const GOALS = [
   'latency',
@@ -19,7 +19,7 @@ function fmtCtx(c) {
   return String(c)
 }
 
-// 上下文长度选择器：预设快捷值 + 可自定义输入任意 token 数（不固定）
+// Selettore della lunghezza di contesto: valori predefiniti rapidi + inserimento libero di qualsiasi numero di token (non fisso)
 function CtxPicker({ value, onChange }) {
   const { t } = useI18n()
   return (
@@ -99,7 +99,7 @@ function AutoTune({ targetId }) {
         setModels(list)
         setSelected(list[0] || '')
       })
-    // 刷新/重进页面后恢复正在运行的调优任务
+    // Dopo refresh/rientro nella pagina ripristina il task di tuning in esecuzione
     fetch(`/api/tune/active?target_id=${targetId}`)
       .then(r => r.json())
       .then(d => {
@@ -268,7 +268,7 @@ function AutoTune({ targetId }) {
   )
 }
 
-// ==================== AI 调优 ====================
+// ==================== Tuning AI ====================
 
 function AITune({ targetId }) {
   const { t } = useI18n()
@@ -278,14 +278,14 @@ function AITune({ targetId }) {
   const [goal, setGoal] = useState('latency')
   const [userDesc, setUserDesc] = useState('')
 
-  // 配置
+  // Configurazione
   const [cfg, setCfg] = useState({ api_url: '', api_key: '', model_name: '' })
   const [cfgSaved, setCfgSaved] = useState(false)
   const [testResult, setTestResult] = useState(null)
   const [testing, setTesting] = useState(false)
   const [showConfig, setShowConfig] = useState(false)
 
-  // 任务
+  // Task
   const [state, setState] = useState('idle')
   const [logs, setLogs] = useState([])
   const [rounds, setRounds] = useState([])
@@ -339,8 +339,8 @@ function AITune({ targetId }) {
 
   useEffect(() => {
     if (!targetId) return
-    // 并发拉模型列表与运行状态：若当前有模型正在运行（status.model），
-    // 固定选中它，刷新页面不再回退默认。
+    // Recupera in parallelo elenco modelli e stato di esecuzione: se un modello e' in esecuzione (status.model),
+    // lo seleziona in modo fisso, dopo un refresh della pagina non torna piu' al default.
     Promise.all([
       fetch(`/api/store/downloaded?target_id=${targetId}`).then(r => r.json()),
       fetch(`/api/deploy/status?target_id=${targetId}`).then(r => r.json()),
@@ -353,11 +353,11 @@ function AITune({ targetId }) {
         setSelected(list[0] || '')
       }
     })
-    // 加载已有配置
+    // Carica la configurazione esistente
     fetch('/api/ai-tune/config').then(r => r.json()).then(d => {
       if (d.api_url) { setCfg(d); setCfgSaved(true) }
     })
-    // 刷新/重进页面后恢复正在运行的 AI 调优任务
+    // Dopo refresh/rientro nella pagina ripristina il task di tuning AI in esecuzione
     fetch(`/api/ai-tune/active?target_id=${targetId}`)
       .then(r => r.json())
       .then(d => {
@@ -415,7 +415,7 @@ function AITune({ targetId }) {
   return (
     <div>
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-6">
-      {/* 配置区 */}
+      {/* Area di configurazione */}
       <div className="lg:col-span-3 space-y-6">
       <div className="bg-card rounded-xl p-6 border border-gray/30">
         <div className="flex items-center justify-between mb-4">
@@ -469,7 +469,7 @@ function AITune({ targetId }) {
         )}
       </div>
 
-      {/* 调优参数 */}
+      {/* Parametri di tuning */}
       <div className="bg-card rounded-xl p-6 border border-gray/30">
         <label className="block text-gray text-sm mb-2">{t('tune.selectModel')}</label>
         <select value={selected} onChange={e => setSelected(e.target.value)}
@@ -507,14 +507,14 @@ function AITune({ targetId }) {
       </div>
       </div>
 
-      {/* 右栏：进度 */}
+      {/* Colonna destra: avanzamento */}
       <div className="lg:col-span-2">
         <ProgressPanel title={t('tune.aiProgress')} logs={logs} running={state === 'running'}
           emptyHint={t('tune.aiProgressHint')} />
       </div>
       </div>
 
-      {/* 每轮结果 */}
+      {/* Risultati di ogni round */}
       {rounds.length > 0 && (
         <div className="bg-card rounded-xl p-4 border border-gray/30 mb-6">
           <div className="text-sm font-semibold mb-3">{t('tune.rounds', { n: rounds.length })}</div>
@@ -538,7 +538,7 @@ function AITune({ targetId }) {
         </div>
       )}
 
-      {/* 最终推荐 */}
+      {/* Raccomandazione finale */}
       {best && (
         <div className="bg-card rounded-xl p-5 border border-purple/40">
           <div className="text-sm font-semibold text-purple mb-3 inline-flex items-center gap-1.5">
@@ -561,7 +561,7 @@ function AITune({ targetId }) {
   )
 }
 
-// ==================== 主组件 ====================
+// ==================== Componente principale ====================
 
 export default function Tune({ targetId }) {
   const { t } = useI18n()
@@ -571,7 +571,7 @@ export default function Tune({ targetId }) {
     <div>
       <h1 className="text-2xl font-bold mb-6">{t('tune.title')}</h1>
 
-      {/* Tab 切换 */}
+      {/* Cambio scheda */}
       <div className="flex gap-1 mb-6 bg-card rounded-lg p-1 border border-gray/30 max-w-xs">
         <button onClick={() => setTab('auto')}
           className={`flex-1 py-2 px-4 rounded-md text-sm font-semibold transition ${tab === 'auto' ? 'bg-green text-bg' : 'text-gray hover:text-fg'}`}>

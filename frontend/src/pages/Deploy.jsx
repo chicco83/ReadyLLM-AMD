@@ -26,7 +26,7 @@ export default function Deploy({ targetId, target }) {
   )
 }
 
-/* 记住每台目标机上最后选中的模型：重新打开页面时恢复，而不是每次落到列表第一个 */
+/* Ricorda l'ultimo modello selezionato su ogni macchina target: alla riapertura della pagina lo ripristina, invece di cadere ogni volta sul primo della lista */
 const LAST_MODEL_KEY = 'readyllm:lastModel'
 
 function readLastModel(targetId) {
@@ -41,10 +41,10 @@ function writeLastModel(targetId, model) {
     const m = JSON.parse(localStorage.getItem(LAST_MODEL_KEY) || '{}')
     m[targetId] = model
     localStorage.setItem(LAST_MODEL_KEY, JSON.stringify(m))
-  } catch { /* 隐私模式等写入失败可忽略 */ }
+  } catch { /* errori di scrittura (es. modalita' privata) ignorabili */ }
 }
 
-/* ==================== 文本模型部署（llama.cpp / vLLM） ==================== */
+/* ==================== Deploy dei modelli testuali (llama.cpp / vLLM) ==================== */
 
 function TextDeploy({ targetId }) {
   const { t } = useI18n()
@@ -59,8 +59,8 @@ function TextDeploy({ targetId }) {
   useEffect(() => {
     if (!targetId) return
     setMsg('')
-    // 并发拉模型列表与运行状态，等齐后再决定选中项：
-    // 若当前有模型正在运行（status.model），固定选中它，刷新页面不再回退默认。
+    // Recupera in parallelo elenco modelli e stato di esecuzione, e solo dopo averli ottenuti entrambi decide la selezione:
+    // se un modello e' in esecuzione (status.model), lo seleziona in modo fisso, dopo un refresh della pagina non torna piu' al default.
     Promise.all([
       fetch(`/api/deploy/models?target_id=${targetId}`).then(r => r.json()),
       fetch(`/api/deploy/status?target_id=${targetId}`).then(r => r.json()),
@@ -69,7 +69,7 @@ function TextDeploy({ targetId }) {
       setModels(list)
       setStatus(st)
       if (md.error) setMsg(md.error)
-      // 选中优先级：运行中模型 > 上次本机选中的（仍在列表中）> 列表第一个
+      // Priorita' di selezione: modello in esecuzione > ultimo selezionato su questa macchina (ancora in elenco) > primo della lista
       const restore = (cur) => {
         if (cur) return cur
         const last = readLastModel(targetId)
@@ -78,13 +78,13 @@ function TextDeploy({ targetId }) {
       if (st.running && st.model && list.includes(st.model)) {
         setSelected(st.model)
       } else {
-        // StrictMode 双跑时第二次 SSH 探测偶发 running=false：
-        // 仅当尚无选中项时按恢复优先级落值，不得强翻已定选中项
+        // Con il doppio avvio di StrictMode la seconda sonda SSH puo' dare occasionalmente running=false:
+        // il valore si assegna con la priorita' di ripristino solo quando non c'e' ancora una selezione, non si ribalta mai una selezione gia' decisa
         setSelected(restore)
       }
     }).catch(() => {
-      // status 探测失败（SSH 抖动等）不代表没在运行：只补拉模型列表、
-      // 保留已有选中，仅未选中时才恢复上次/落到列表第一个
+      // Il fallimento della sonda status (instabilita' SSH ecc.) non significa che non sia in esecuzione: si recupera solo l'elenco modelli,
+      // mantenendo la selezione esistente, e solo senza selezione si ripristina l'ultima / si cade sul primo della lista
       fetch(`/api/deploy/models?target_id=${targetId}`)
         .then(r => r.json())
         .then(d => {
@@ -97,20 +97,20 @@ function TextDeploy({ targetId }) {
     })
   }, [targetId])
 
-  // 记住每台目标机最后选中的模型，重新打开页面时恢复
+  // Ricorda l'ultimo modello selezionato su ogni macchina target, ripristinato alla riapertura della pagina
   useEffect(() => {
     if (targetId && selected) writeLastModel(targetId, selected)
   }, [targetId, selected])
 
-  // 模型选定后拉取默认参数：优先最近调优，回退确定性生成
+  // Dopo la scelta del modello recupera i parametri di default: priorita' all'ultimo tuning, ripiego sulla generazione deterministica
   useEffect(() => {
     if (!targetId || !selected) {
       setArgsText('')
       setArgsMeta(null)
       return
     }
-    // 过期响应防护：调优参数命中本地记录秒回、未命中需 SSH 现采硬件约 4s，
-    // 模型切换后慢的旧请求不得覆盖新模型的快响应（谁后到谁赢 → 谁最新谁赢）
+    // Protezione dalle risposte obsolete: i parametri di tuning presenti nel registro locale rispondono subito, se mancano serve rilevare l'hardware via SSH (circa 4s),
+    // dopo un cambio di modello la vecchia richiesta lenta non deve sovrascrivere la risposta veloce del nuovo modello (vince l'ultima arrivata -> vince la piu' recente)
     let ignore = false
     setLoadingArgs(true)
     fetch(`/api/deploy/default-args?target_id=${targetId}&model=${encodeURIComponent(selected)}`)
@@ -261,7 +261,7 @@ function TextDeploy({ targetId }) {
   )
 }
 
-/* ==================== 视频模型部署（ComfyUI） ==================== */
+/* ==================== Deploy dei modelli video (ComfyUI) ==================== */
 
 const RES_PRESETS = [
   { label: '480p (832×480)', width: 832, height: 480 },
@@ -296,13 +296,13 @@ function VideoDeploy({ targetId, target }) {
     if (!targetId) return
     setMsg('')
     fetch(`/api/deploy/status?target_id=${targetId}`).then(r => r.json()).then(setStatus)
-    // 扫描目标机 ComfyUI diffusion_models 目录，列出真实已下载的模型
+    // Scansiona la cartella diffusion_models di ComfyUI sulla macchina target ed elenca i modelli realmente scaricati
     fetch(`/api/deploy/video-models?target_id=${targetId}`)
       .then(r => r.json())
       .then(d => {
         const list = d.models || []
         setModels(list)
-        // 恢复上次选中（仍在列表中）> 列表第一个
+        // Ripristina l'ultimo selezionato (ancora in elenco) > primo della lista
         const last = readLastModel(targetId)
         setSelected((cur) => {
           if (cur) return cur
@@ -312,12 +312,12 @@ function VideoDeploy({ targetId, target }) {
       })
   }, [targetId])
 
-  // 记住每台目标机最后选中的模型，重新打开页面时恢复
+  // Ricorda l'ultimo modello selezionato su ogni macchina target, ripristinato alla riapertura della pagina
   useEffect(() => {
     if (targetId && selected) writeLastModel(targetId, selected)
   }, [targetId, selected])
 
-  // 轮询生成进度
+  // Polling dell'avanzamento della generazione
   useEffect(() => {
     if (!job?.prompt_id || job.state === 'completed') return
     pollRef.current = setInterval(async () => {
@@ -459,7 +459,7 @@ function VideoDeploy({ targetId, target }) {
               className="w-full bg-bg border border-gray/40 rounded-lg px-3 py-2 text-fg text-sm h-20 focus:border-blue outline-none resize-y mb-2"
             />
 
-            {/* AI 智能编排开关 */}
+            {/* Interruttore di orchestrazione intelligente con AI */}
             <button
               type="button"
               onClick={() => set('enhance', !form.enhance)}
@@ -516,7 +516,7 @@ function VideoDeploy({ targetId, target }) {
           </>
         )}
 
-        {/* 生成进度 */}
+        {/* Avanzamento della generazione */}
         {job && (
           <div className="mt-6 p-4 rounded-lg bg-bg border border-gray/30">
             <div className="flex items-center gap-2 mb-2">

@@ -1,6 +1,6 @@
-"""智能调优 API
+"""API di tuning intelligente
 
-启动两阶段调优压测任务（后台执行，返回 job_id），轮询查询进度与结果。
+Avvia il test di carico di tuning in due fasi (esecuzione in background, restituisce job_id) e interroga avanzamento e risultati con polling.
 """
 
 from fastapi import APIRouter
@@ -15,15 +15,15 @@ router = APIRouter()
 class TuneRequest(BaseModel):
     target_id: str
     model: str
-    ctx_size: int = 8192                 # 用户固定的上下文长度（约束，不被优化）
+    ctx_size: int = 8192                 # lunghezza di contesto fissata dall'utente (vincolo, non ottimizzata)
     goal: str = "latency"                # latency | throughput | prefill
-    baseline_cfg: Optional[Dict] = None  # 用户当前参数，作为基线先测对比
-    model_size_gb: float = 0.0           # 模型权重 GB，0 则后端自动探测
+    baseline_cfg: Optional[Dict] = None  # parametri attuali dell'utente, misurati prima come baseline di confronto
+    model_size_gb: float = 0.0           # GB dei pesi del modello; se 0 il backend lo rileva automaticamente
 
 
 @router.post("/start")
 def start(req: TuneRequest):
-    """启动两阶段调优任务"""
+    """Avvia il task di tuning in due fasi"""
     return tuner.start_tune(
         req.target_id, req.model, req.ctx_size, req.goal,
         req.baseline_cfg, req.model_size_gb,
@@ -32,7 +32,7 @@ def start(req: TuneRequest):
 
 @router.get("/status/{job_id}")
 def status(job_id: str):
-    """查询调优进度与结果"""
+    """Interroga avanzamento e risultati del tuning"""
     job = tuner.get_job(job_id)
     if not job:
         return {"status": "not_found", "logs": [], "results": []}
@@ -41,13 +41,13 @@ def status(job_id: str):
 
 @router.get("/active")
 def active(target_id: str):
-    """返回该目标机正在运行的调优任务，供前端刷新后恢复轮询"""
+    """Restituisce il task di tuning in corso sulla macchina target, per riprendere il polling dopo un refresh del frontend"""
     return {"jobs": tuner.list_active_jobs(target_id)}
 
 
 @router.get("/options")
 def options():
-    """返回可选的优化目标与基线参数取值范围，供前端渲染"""
+    """Restituisce gli obiettivi di ottimizzazione disponibili e gli intervalli dei parametri baseline, per il rendering del frontend"""
     return {
         "goals": [{"value": k, "label": v} for k, v in tuner.GOAL_LABELS.items()],
         "spec_options": tuner.SPEC_OPTIONS,
@@ -60,19 +60,19 @@ def options():
 class SaveTuneRequest(BaseModel):
     target_id: str
     model: str
-    ctx_size: int                        # 固定上下文长度，随参数一并保存
-    params: Dict[str, str]               # 最优参数（扁平字典，不含 ctx-size）
+    ctx_size: int                        # lunghezza di contesto fissa, salvata insieme ai parametri
+    params: Dict[str, str]               # parametri ottimali (dizionario piatto, senza ctx-size)
     score: float = 0.0
 
 
 @router.post("/save")
 def save(req: SaveTuneRequest):
-    """把某次调优的最优参数（含固定 ctx_size）保存到该模型，
-    作为部署页 default-args 的回填来源。用户在结果界面点「保存并应用」时调用。"""
+    """Salva sul modello i parametri ottimali di un tuning (incluso ctx_size fisso),
+    come sorgente per precompilare i default-args della pagina Deploy. Chiamata quando l'utente clicca «Salva e applica» nella schermata dei risultati."""
     if not req.params:
-        return {"ok": False, "message": "无参数可保存"}
+        return {"ok": False, "message": "Nessun parametro da salvare"}
     tune_history.save_latest(
         req.target_id, req.model, req.ctx_size, req.params,
         source="tuner", score=req.score,
     )
-    return {"ok": True, "message": f"已保存到 {req.model} 的部署参数（含 ctx={req.ctx_size}）"}
+    return {"ok": True, "message": f"Salvato nei parametri di deploy di {req.model} (con ctx={req.ctx_size})"}

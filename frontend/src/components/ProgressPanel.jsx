@@ -1,7 +1,7 @@
 import { useI18n } from '../i18n/I18nContext'
 
-// 可复用进度面板：标题 + 实时日志列表，用于调优页右侧栏
-// running=true 时显示活动指示；logs 为空时显示等待占位
+// Pannello di avanzamento riutilizzabile: titolo + elenco di log in tempo reale, usato nella barra destra della pagina di tuning
+// Con running=true mostra l'indicatore di attivita'; con logs vuoto mostra il segnaposto di attesa
 
 export default function ProgressPanel({ title = 'Tuning Progress', logs = [], running = false, emptyHint = 'Waiting for task to start…' }) {
   const { t } = useI18n()

@@ -11,7 +11,7 @@ import {
 import Logo from './components/Logo'
 import { I18nProvider, useI18n, LangSwitch } from './i18n/I18nContext'
 
-// 首页直接复用实时监控视图
+// La home riusa direttamente la vista di monitoraggio in tempo reale
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'nav.monitor', icon: IconActivity },
   { id: 'store', label: 'nav.store', icon: IconStore },
@@ -64,9 +64,9 @@ function AppInner() {
 
   return (
     <div className="flex h-screen text-fg">
-      {/* 侧边导航 */}
+      {/* Navigazione laterale */}
       <nav className="w-60 shrink-0 border-r border-white/5 bg-card/40 backdrop-blur-xl p-4 flex flex-col">
-        {/* 品牌区 */}
+        {/* Area del marchio */}
         <div className="flex items-center gap-3 px-2 pt-1 pb-6">
           <Logo size={38} />
           <div className="leading-tight">
@@ -75,7 +75,7 @@ function AppInner() {
           </div>
         </div>
 
-        {/* 导航项 */}
+        {/* Voci di navigazione */}
         <div className="flex flex-col gap-1">
           {NAV_ITEMS.map(item => {
             const Icon = item.icon
@@ -104,7 +104,7 @@ function AppInner() {
           })}
         </div>
 
-        {/* 目标机器选择器 */}
+        {/* Selettore della macchina target */}
         {page !== 'settings' && hasTarget && (
           <div className="mt-auto pt-4 border-t border-white/5">
             <div className="text-[11px] uppercase tracking-wider text-gray mb-2 px-2 flex items-center gap-1.5">
@@ -123,13 +123,13 @@ function AppInner() {
             </select>
           </div>
         )}
-        {/* 目标机器选择器隐藏时（设置页 / 无目标），语言按钮需自己吸底 */}
+        {/* Quando il selettore e' nascosto (pagina Impostazioni / nessun target), il pulsante della lingua deve ancorarsi da solo in basso */}
         <div className={page === 'settings' || !hasTarget ? 'mt-auto pt-4' : 'mt-3'}>
           <LangSwitch />
         </div>
       </nav>
 
-      {/* 主内容 */}
+      {/* Contenuto principale */}
       <main className="flex-1 overflow-auto p-8">
         {page === 'settings' ? (
           <Settings targets={targets} onSaved={handleSaved} onChanged={refreshTargets} />
