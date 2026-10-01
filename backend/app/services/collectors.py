@@ -215,15 +215,23 @@ def _collect_gpu_windows(executor: Executor, target: Target) -> dict:
     Usa le classi WMI Win32_PerfFormattedData_GPUPerformanceCounters_*: i NOMI DI CLASSE non
     sono localizzati (a differenza dei percorsi Get-Counter, che su Windows in italiano
     sarebbero 'Motore GPU' ecc.). Temperatura/potenza non sono esposte da Windows -> 0."""
+    # [2026-10-01 v1.1.18] Utilizzo GPU dai contatori RAW (due campioni a 0.7 s, delta busy/delta tempo): le classi
+    # «Formatted» davano 0% perche' il primo campione dopo una pausa non ha un delta valido (GPU 0.0% nel tuning anche con la
+    # GPU al lavoro a 47 t/s). Si somma per tipo di engine (3D, Compute_0, Copy...) e si prende il piu' carico.
+    # Versione precedente: Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine -> Measure-Object UtilizationPercentage -Sum
     cmd = _ps(
-        "$e=Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine -ErrorAction SilentlyContinue "
-        "| Where-Object {$_.Name -like '*engtype_3D*' -or $_.Name -like '*engtype_Compute*'} "
-        "| Measure-Object UtilizationPercentage -Sum; "
-        "$m=Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory -ErrorAction SilentlyContinue "
+        "$a=Get-CimInstance Win32_PerfRawData_GPUPerformanceCounters_GPUEngine -ErrorAction SilentlyContinue; "
+        "Start-Sleep -Milliseconds 700; "
+        "$b=Get-CimInstance Win32_PerfRawData_GPUPerformanceCounters_GPUEngine -ErrorAction SilentlyContinue; "
+        "$h=@{}; foreach($x in $a){$h[$x.Name]=$x}; $g=@{}; "
+        "foreach($y in $b){ $x=$h[$y.Name]; if($x){ $dt=$y.Timestamp_Sys100NS-$x.Timestamp_Sys100NS; "
+        "if($dt -gt 0){ $k=($y.Name -replace '.*engtype_',''); $g[$k]+=(($y.UtilizationPercentage-$x.UtilizationPercentage)/$dt*100) } } }; "
+        "$m=0; foreach($k in $g.Keys){ if($g[$k] -gt $m){$m=$g[$k]} }; "
+        "$mem=Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory -ErrorAction SilentlyContinue "
         "| Measure-Object DedicatedUsage -Maximum; "
-        "Write-Output ('UTIL=' + $e.Sum); Write-Output ('VRAMUSED=' + $m.Maximum)"
+        "Write-Output ('UTIL=' + [math]::Round($m,1)); Write-Output ('VRAMUSED=' + $mem.Maximum)"
     )
-    result = executor.run(cmd, timeout=20)
+    result = executor.run(cmd, timeout=25)
     kv = _parse_kv_lines(result.stdout)
     static = _static_gpu_cached(executor, target, "windows")
     if not static:

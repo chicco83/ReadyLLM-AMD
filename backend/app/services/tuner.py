@@ -17,6 +17,7 @@ Senza motore/senza modello restituisce un errore esplicito, mai dati simulati.
 """
 
 import threading
+import re
 import time
 import json
 import uuid
@@ -144,26 +145,50 @@ _CACHE_BYTES = {"f16": 2.0, "q8_0": 1.0, "q4_0": 0.5}
 
 
 def _estimate_vram_gb(model_size_gb: float, ctx_size: int,
-                      cache_type: str, kv_heads_dim: int = 8192) -> float:
-    """Stima approssimativa dell'occupazione di VRAM in GB: pesi + KV cache.
-    kv_heads_dim e' un'approssimazione della dimensione KV (ordine di grandezza hidden*n_heads), circa 8192 per la classe 27B.
-    Pesi tutti in GPU (scenario n-gpu-layers=all); lo scenario di ripiego su CPU e' gestito a parte dal chiamante.
+                      cache_type: str, kv_heads_dim: int = 1024, calib: Optional[dict] = None) -> float:
+    """Stima approssimativa dell'occupazione di VRAM in GB: pesi + KV cache + buffer di calcolo.
+
+    [2026-10-01 v1.1.18] Due correzioni, dal tuning dell'utente (9B Q8_0, ctx 262144, 15.8 GB di VRAM): la vecchia stima
+    (kv_dim 8192 = attenzione senza GQA, 64 strati, tarata su un 27B) scartava TUTTE le combinazioni GPU anche se la baseline
+    con cache f16 girava benissimo in GPU, e il tuning ripiegava su una CPU lentissima.
+      1) calibrazione REALE: se una prova precedente ha loggato "llama_kv_cache: size = X MiB", si usa quel valore (scalato per
+         il tipo di cache) invece della stima;
+      2) senza calibrazione: kv_dim 1024 (GQA, 8 KV head x 128) e numero di strati dedotto dalla dimensione del modello.
+    Versione precedente: kv_bytes = 2 * ctx_size * 8192 * bytes; kv_gb = kv_bytes * 64 / 1024**3  (sempre 64 strati)
     """
-    # KV cache: 2(K+V) * ctx * kv_dim * bytes * approssimazione in proporzione al numero di strati
-    # Semplificazione: ctx * kv_dim * cache_bytes * 2 / 1e9, poi moltiplicato per un coefficiente empirico sul numero di strati
-    kv_bytes = 2 * ctx_size * kv_heads_dim * _CACHE_BYTES.get(cache_type, 2.0)
-    # 27B ha circa 64 strati, ognuno con KV; il 2* sopra include gia' K/V, qui si moltiplica ancora per gli strati
-    kv_gb = kv_bytes * 64 / (1024 ** 3)
-    return model_size_gb + kv_gb
+    if calib and calib.get("kv_gb"):
+        # la KV misurata era con calib["cache"]: si riporta a f16 e poi al tipo richiesto
+        f16 = calib["kv_gb"] / (_CACHE_BYTES.get(calib.get("cache", "f16"), 2.0) / 2.0)
+        kv_gb = f16 * (_CACHE_BYTES.get(cache_type, 2.0) / 2.0)
+    else:
+        layers = max(24, min(80, int(model_size_gb * 3.5)))
+        kv_gb = 2 * ctx_size * kv_heads_dim * _CACHE_BYTES.get(cache_type, 2.0) * layers / (1024 ** 3)
+    return model_size_gb + kv_gb + 1.0     # +1 GB: buffer di calcolo / contesto GPU
 
 
-def _fits_vram(cfg: dict, model_size_gb: float, ctx_size: int, gpu_vram_gb: float) -> bool:
+_KV_RE = re.compile(r"llama_kv_cache\w*:\s*size\s*=\s*([\d.]+)\s*MiB", re.I)
+
+
+def _kv_gb_from_log(executor: Executor, target: Target) -> float:
+    """Somma le righe «llama_kv_cache: size = X MiB» dell'ultimo avvio di llama-server (0 se assenti)."""
+    righe = _log_server_tail(executor, target, 400)
+    tot = sum(float(m.group(1)) for ln in righe for m in [_KV_RE.search(ln)] if m)
+    return round(tot / 1024.0, 3)
+
+
+def _fits_vram(cfg: dict, model_size_gb: float, ctx_size: int, gpu_vram_gb: float,
+               calib: Optional[dict] = None) -> bool:
     """Stabilisce se la configurazione ci sta in VRAM; n-gpu-layers=0 e' un ripiego su CPU e «ci sta» sempre (lento)"""
     if cfg.get("n-gpu-layers") == "0":
         return True
-    est = _estimate_vram_gb(model_size_gb, ctx_size, cfg.get("cache-type-k", "f16"))
-    # Lascia il 10% di margine per attivazioni/frammentazione della VRAM
-    return est <= gpu_vram_gb * 0.9
+    est = _estimate_vram_gb(model_size_gb, ctx_size, cfg.get("cache-type-k", "f16"), calib=calib)
+    # Lascia il 5% di margine per frammentazione della VRAM (prima 10%: con la stima corretta basta meno)
+    return est <= gpu_vram_gb * 0.95
+
+
+def _get_calib(job_id: str) -> Optional[dict]:
+    with _LOCK:
+        return (_JOBS.get(job_id) or {}).get("kv_calib")
 
 
 # ==================== Baseline = parametri del Deploy; supporto MTP (v1.1.11, 2026-10-01) ====================
@@ -444,6 +469,15 @@ def _run_one(executor: Executor, target: Target, engine: LlamaCppAdapter,
         engine.stop()
         return None
     metrics = _bench_median(executor, target, ctx_size)
+    # [2026-10-01 v1.1.18] Calibra la stima della KV cache sul valore reale loggato da llama-server
+    try:
+        kv = _kv_gb_from_log(executor, target)
+        if kv > 0:
+            with _LOCK:
+                _JOBS[job_id]["kv_calib"] = {"kv_gb": kv, "cache": cfg.get("cache-type-k", "f16")}
+            _append_log(job_id, f"  KV cache reale: {kv:.2f} GB (cache {cfg.get('cache-type-k', 'f16')}): stime di VRAM calibrate su questo valore")
+    except Exception:
+        pass
     engine.stop()
     time.sleep(2)
     _append_log(job_id, f"  [{tag}] {label} → decodifica {metrics['decode']} t/s, "
@@ -464,7 +498,7 @@ def _coarse_search(executor, target, engine, model_path, ctx_size,
                 cfg = _normalize_cfg(spec, cache, ngl,
                                      CONTINUOUS_GRID["batch-size"][1],
                                      CONTINUOUS_GRID["ubatch-size"][1], 3)
-                if _fits_vram(cfg, model_size_gb, ctx_size, gpu_vram_gb):
+                if _fits_vram(cfg, model_size_gb, ctx_size, gpu_vram_gb, _get_calib(job_id)):
                     out.append(cfg)
                 else:
                     _append_log(job_id, f"  Saltata (VRAM insufficiente): {_cfg_label(cfg)}")
@@ -472,8 +506,13 @@ def _coarse_search(executor, target, engine, model_path, ctx_size,
 
     candidates = _build("all")
     if not candidates:
-        _append_log(job_id, "  Tutte le combinazioni solo-GPU superano la VRAM, ripiego su CPU (n-gpu-layers=0)")
-        candidates = _build("0")
+        # [2026-10-01 v1.1.18] Prima: ripiego su CPU (n-gpu-layers=0), lentissimo e quasi sempre inutile. Ora si provano comunque
+        # le combinazioni con cache q4_0 in GPU (la stima e' solo un'approssimazione: vale la prova reale).
+        # Versione precedente: _append_log(... "ripiego su CPU (n-gpu-layers=0)"); candidates = _build("0")
+        _append_log(job_id, "  La stima della VRAM scarta tutte le combinazioni GPU: provo comunque quelle con cache q4_0 (la prova reale decide)")
+        for spec in (SPEC_OPTIONS if allow_mtp else [o for o in SPEC_OPTIONS if o == "off"]):
+            candidates.append(_normalize_cfg(spec, "q4_0", "all", CONTINUOUS_GRID["batch-size"][1],
+                                             CONTINUOUS_GRID["ubatch-size"][1], 3))
 
     _append_log(job_id, f"[Fase 1 coarse] {len(candidates)} combinazioni di fattori dominanti")
     scored = []
@@ -525,7 +564,7 @@ def _fine_search(executor, target, engine, model_path, ctx_size,
                     continue
                 trial = dict(best["config"])
                 trial[param] = str(options[ni])
-                if not _fits_vram(trial, model_size_gb, ctx_size, gpu_vram_gb):
+                if not _fits_vram(trial, model_size_gb, ctx_size, gpu_vram_gb, _get_calib(job_id)):
                     continue
                 r = _run_one(executor, target, engine, model_path, trial, ctx_size,
                              job_id, f"fine {param}={options[ni]}")

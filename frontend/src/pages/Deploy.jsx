@@ -3,6 +3,7 @@ import { IconRefresh, IconPlay, IconStop, IconRocket } from '../components/Icons
 import LongVideoDeploy from './LongVideoDeploy'
 import Tune from './Tune'
 import { readLastModel, writeLastModel } from '../lib/lastModel'
+import ProgressPanel from '../components/ProgressPanel'
 import { useI18n } from '../i18n/I18nContext'
 
 export default function Deploy({ targetId, target, embedded = false }) {
@@ -71,7 +72,7 @@ export default function Deploy({ targetId, target, embedded = false }) {
 
 /* ==================== Deploy dei modelli testuali (llama.cpp / vLLM) ==================== */
 
-function TextDeploy({ targetId, embedded = false }) {
+function TextDeploy({ targetId, embedded = false, onStarted }) {
   const { t } = useI18n()
   const [models, setModels] = useState([])
   const [selected, setSelected] = useState('')
@@ -179,7 +180,11 @@ function TextDeploy({ targetId, embedded = false }) {
     })
     const d = await res.json()
     setMsg(d.message)
-    if (d.success) await pollStatus(true)
+    if (d.success) {
+      await pollStatus(true)
+      // [2026-10-01 v1.1.18] Avviato il motore si passa da solo al passo 2 (Tuning)
+      if (onStarted) onStarted()
+    }
   }
 
   async function stop() {
@@ -192,7 +197,8 @@ function TextDeploy({ targetId, embedded = false }) {
 
   useEffect(() => {
     // [2026-10-01 v1.1.13] il log si legge anche a motore acceso (ogni 5 s) per avvisare se la GPU non e' usata
-    if ((!showLog && !status?.running) || !targetId) return
+    // [2026-10-01 v1.1.18] Il log e' sempre visibile nel pannello a destra: lettura continua (3 s se il motore e' acceso)
+    if (!targetId) return
     let alive = true
     const load = () => fetch(`/api/deploy/log?target_id=${targetId}`)
       .then(r => r.json()).then(d => {
@@ -200,9 +206,9 @@ function TextDeploy({ targetId, embedded = false }) {
         setLogLines(d.lines || []); setOffload(d.offload || null); setGpuDevices(d.gpu_devices || [])
       }).catch(() => {})
     load()
-    const id = setInterval(load, showLog ? 3000 : 5000)
-    return () => { alive = false; clearInterval(id) }
-  }, [showLog, targetId, status?.running])
+    const id = status?.running ? setInterval(load, 3000) : null
+    return () => { alive = false; if (id) clearInterval(id) }
+  }, [targetId, status?.running])
 
   function resetArgs() {
     if (!targetId || !selected) return
@@ -224,7 +230,9 @@ function TextDeploy({ targetId, embedded = false }) {
     <div>
       {!embedded && <h1 className="text-2xl font-bold mb-6">{t('deploy.title')}</h1>}
 
-      <div className="bg-card rounded-xl p-6 border border-gray/30 max-w-2xl">
+      {/* [2026-10-01 v1.1.18] Come nel Tuning: comandi a sinistra, log del motore (avanzamento) a destra */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+      <div className="bg-card rounded-xl p-6 border border-gray/30 lg:col-span-3">
         <div className="flex items-center gap-3 mb-6">
           <span className={`w-3 h-3 rounded-full ${status?.running ? 'bg-green' : 'bg-gray'}`} />
           <span className="font-semibold">{status?.running ? t('deploy.running') : t('deploy.stopped')}</span>
@@ -311,17 +319,12 @@ function TextDeploy({ targetId, embedded = false }) {
           <div className="mt-4 text-xs text-green">{t('deploy.gpuUsed', { done: offload.done, total: offload.total })}</div>
         )}
 
-        {/* [2026-10-01 v1.1.12] Log del motore: llama-server gira senza finestra visibile, l'output e' nel file di log */}
-        <div className="mt-4">
-          <button onClick={() => setShowLog(s => !s)} className="text-xs text-gray hover:text-fg transition">
-            {showLog ? t('deploy.hideLog') : t('deploy.showLog')}
-          </button>
-          {showLog && (
-            <pre className="mt-2 bg-bg rounded-lg p-3 max-h-64 overflow-auto font-mono text-xs text-fg/80 whitespace-pre-wrap">
-              {logLines.length ? logLines.join('\n') : t('deploy.logEmpty')}
-            </pre>
-          )}
-        </div>
+      </div>
+
+      <div className="lg:col-span-2">
+        <ProgressPanel title={t('deploy.engineLog')} running={!!status?.running}
+          logs={logLines.map(l => ({ t: '', msg: l }))} emptyHint={t('deploy.logEmpty')} />
+      </div>
       </div>
     </div>
   )

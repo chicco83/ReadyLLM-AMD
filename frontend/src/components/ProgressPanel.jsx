@@ -20,7 +20,7 @@ export default function ProgressPanel({ title = 'Tuning Progress', logs = [], ru
         {logs.length === 0
           ? <div className="text-gray/50">{emptyHint}</div>
           : logs.map((l, i) => (
-              <div key={i}><span className="text-gray/50">[{l.t}]</span> {l.msg}</div>
+              <div key={i}>{l.t && <span className="text-gray/50">[{l.t}] </span>}{l.msg}</div>
             ))}
       </div>
     </div>
