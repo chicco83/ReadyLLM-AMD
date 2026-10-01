@@ -94,3 +94,6 @@ Il log mostra «Release bNNNNN: N asset (fonte: ...)»: se vedi un tag diverso d
 
 ## 20. Log a destra e passaggio automatico
 Nel Deploy il log del motore e' sempre visibile a destra. Dopo «Avvia» (a motore avviato) si passa automaticamente alla scheda Tuning. Nel tuning, la riga «KV cache reale: X GB» indica che le stime di VRAM sono state calibrate sul log del motore.
+
+## 18. Elenco build installate (v1.1.19)
+Il pannello «Motori di inferenza» in basso elenca tutte le build trovate (es. `C:\llama\rocm` e `C:\llama\vulkan`) con backend, versione e dispositivi; la build in uso e' marcata «In uso». Per cambiarla si usano i pulsanti del backend nel modulo. Alla riapertura delle Impostazioni la macchina salvata e' gia' selezionata.

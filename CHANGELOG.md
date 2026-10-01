@@ -1,8 +1,12 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.18** — 2026-10-01 23:00
+Versione corrente: **1.1.19** — 2026-10-01 23:30
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 21. v1.1.19 — 2026-10-01 23:30 — Pannello «Motori di inferenza»: tutte le build
+- Il pannello in basso elenca ogni build di llama-server installata (ROCm e Vulkan) con backend, versione (`--version`), dispositivi e marcatore «In uso».
+- Impostazioni: all'apertura si seleziona la macchina salvata (prima il modulo partiva «nuovo» senza id e non mostrava lo stato dei backend).
 
 ## 20. v1.1.18 — 2026-10-01 23:00 — Tuning: stima VRAM calibrata, utilizzo GPU, layout Deploy
 - Stima VRAM calibrata sul log reale (`llama_kv_cache: size`); niente piu' ripiego automatico su CPU: se la stima scarta tutto si provano le combinazioni q4_0 in GPU.
