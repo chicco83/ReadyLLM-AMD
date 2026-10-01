@@ -140,3 +140,6 @@ Con piu' build GPU installate (Impostazioni → Motori di inferenza) compare «P
 
 ## 30. ROCm su Windows (v1.1.30)
 Impostazioni → Backend: ROCm. Se la build installata non vede la GPU compare l'avviso rosso con **Reinstalla**: scarica da `lemonade-sdk/llamacpp-rocm` il pacchetto `llama-b<N>-windows-rocm-<gfx>-x64.zip` adatto alla tua scheda (RX 9070 XT = gfx120X), che include le librerie ROCm, sostituisce il contenuto di `C:\llama\rocm` e lo mette in uso. A fine installazione il log dice se la GPU e' stata rilevata. Poi il tuning puo' confrontare ROCm e Vulkan.
+
+## 31. Download e valore «misurati» (v1.1.31)
+Durante l'installazione di un motore Impostazioni mostra una barra con la percentuale scaricata e i MB. Nel Deploy il numero «misurati» e' la decodifica in t/s dell'ultimo tuning; se un salvataggio e' precedente alla correzione e lo storico non lo contiene, il numero non appare finche' non si rifa un tuning (i parametri restano validi).

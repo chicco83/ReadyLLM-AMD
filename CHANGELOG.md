@@ -1,8 +1,12 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.30** — 2026-10-02 04:50
+Versione corrente: **1.1.31** — 2026-10-02 05:20
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 33. v1.1.31 — 2026-10-02 05:20 — Percentuale di download e valore «misurati» corretto
+- **Download da GitHub:** barra di avanzamento con percentuale e MB (Impostazioni) e riga di log aggiornata sul posto. La dimensione totale si legge con una richiesta HEAD, il file parziale si controlla ogni 2 s (`job["progress"]` in `GET /api/target/install-status`).
+- **Deploy «misurati X t/s»:** il valore 42.61 era il punteggio composito di un vecchio tuning (salvato prima della correzione 1.1.26). I record senza `score_kind` ora usano la decodifica dello storico tuning, se presente, altrimenti il valore non viene mostrato; i nuovi salvataggi portano `score_kind: decode_tps`.
 
 ## 32. v1.1.30 — 2026-10-02 04:50 — ROCm su Windows: pacchetto con librerie incluse
 - Causa di «ROCm non rileva la scheda»: i pacchetti ufficiali ggml-org `win-rocm-*` non includono piu' hipblas.dll/rocblas.dll (llama.cpp PR #25775, issue #26996).
