@@ -1,6 +1,6 @@
 # MANUALE — ReadyLLM-AMD
 
-Versione: **1.1.5** — 2026-10-01 22:11
+Versione: **1.1.6** — 2026-10-01 22:16
 
 ## 1. Avvio
 Dalla radice del progetto: `python avvia.py` (backend + frontend), `python avvia.py --installa` (installa prima le dipendenze), `python avvia.py --comandi` (stampa i comandi manuali), `--backend` / `--frontend` per avviarne uno solo. Ctrl+C li ferma entrambi. Comandi manuali:
@@ -56,3 +56,6 @@ Il pulsante in basso nella barra laterale ruota English → Italiano → 中文.
 
 ## 9. Errori npm TAR_ENTRY_ERROR su Google Drive
 Causa: Drive per desktop e' un disco virtuale. Soluzioni: (1) spostare il progetto in `C:\dev` (consigliato); (2) `python avvia.py --installa` copia il frontend in `%LOCALAPPDATA%\ReadyLLM-AMD\frontend` (robocopy) ed esegue npm/vite da li'; (3) sospendere Drive durante `npm ci`.
+
+## 10. Diagnosi GPU/VRAM
+Se la VRAM e' errata esegui `python avvia.py --diagnosi-gpu` e invia l'output (mostra le fonti CLASS / DX / VC con i relativi valori).

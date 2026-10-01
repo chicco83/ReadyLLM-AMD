@@ -1,6 +1,6 @@
 # CLAUDE.md — ReadyLLM-AMD
 
-Versione documento: 1.1.5 — 2026-10-01 22:11
+Versione documento: 1.1.6 — 2026-10-01 22:16
 
 ## Regole obbligatorie per ogni sessione (locale o cloud)
 
@@ -9,7 +9,7 @@ Versione documento: 1.1.5 — 2026-10-01 22:11
 
 1. **Versioning**: ogni revisione di codice o documentazione incrementa il numero di versione
    (semver: x.y.z). La versione, con data e ora, va scritta **in cima al contenuto** del file e
-   **nel nome** dei documenti versionati (es. `MANUAL_v1.1.5_2026-10-01_2211.md`).
+   **nel nome** dei documenti versionati (es. `MANUAL_v1.1.6_2026-10-01_2216.md`).
 2. **Tre documenti sempre aggiornati** a ogni attività:
    - `CONTEXT_v<versione>_<data>_<ora>.md` — contesto del progetto, architettura, decisioni.
    - `CHANGELOG.md` — voci numerate in ordine, una per revisione (data/ora, versione, modifiche).

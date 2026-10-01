@@ -1,6 +1,6 @@
 # CONTEXT — ReadyLLM-AMD
 
-Versione: **1.1.5** — 2026-10-01 22:11
+Versione: **1.1.6** — 2026-10-01 22:16
 
 ## Scopo
 Assistente di deploy/tuning/monitoraggio per LLM locali (llama.cpp, vLLM, SGLang) e generazione video
@@ -59,3 +59,6 @@ Aggiunto `avvia.py` nella radice: avvia backend (uvicorn, porta 8000) e frontend
 
 ## Aggiornamento 1.1.5
 Su Drive (Windows) `avvia.py` esegue il frontend da una copia locale in `%LOCALAPPDATA%\ReadyLLM-AMD\frontend`, rinnovata a ogni avvio. Non verificato su Windows reale.
+
+## Aggiornamento 1.1.6 — VRAM AMD su Windows
+VRAM rilevata a 4 GB = ripiego su `Win32_VideoController.AdapterRAM` (uint32). Aggiunta la fonte `HKLM\SOFTWARE\Microsoft\DirectX\<guid>\DedicatedVideoMemory` (64 bit) e `avvia.py --diagnosi-gpu`. Non verificato sulla RX 9070 XT reale.

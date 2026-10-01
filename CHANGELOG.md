@@ -1,8 +1,12 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.5** — 2026-10-01 22:11
+Versione corrente: **1.1.6** — 2026-10-01 22:16
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 8. v1.1.6 — 2026-10-01 22:16 — VRAM AMD su Windows
+- `collectors.py`: nuova fonte DirectX (DedicatedVideoMemory, 64 bit) per la VRAM; il valore da `AdapterRAM` (max 4 GB) resta solo come ultimo ripiego.
+- `avvia.py --diagnosi-gpu`: stampa risultato e output grezzo delle fonti.
 
 ## 7. v1.1.5 — 2026-10-01 22:11 — Frontend da copia locale su Drive
 - La giunzione di v1.1.4 falliva ("sono necessari volumi NTFS locali"): `avvia.py` ora copia il frontend con robocopy in `%LOCALAPPDATA%\ReadyLLM-AMD\frontend` ed esegue npm/vite da li'.
