@@ -1,8 +1,11 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.20** — 2026-10-01 23:50
+Versione corrente: **1.1.21** — 2026-10-02 00:10
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 23. v1.1.21 — 2026-10-02 00:10 — Temperatura GPU su Windows
+- Il Monitoraggio legge la temperatura dalla stessa sorgente di Gestione attivita' (`D3DKMTQueryAdapterInfo`, ADAPTERPERFDATA) via PowerShell; cache 5 s, se non supportata dal driver resta «--» (non si riprova per 10 min). Da verificare sul PC reale.
 
 ## 22. v1.1.20 — 2026-10-01 23:50 — Tuning: motore che si fermava + barra di progresso
 - Bug: il tuner passava `--spec-type off` (valore non valido per llama-server) e il motore usciva dopo la baseline; ora con spec-type=off il parametro e' omesso.

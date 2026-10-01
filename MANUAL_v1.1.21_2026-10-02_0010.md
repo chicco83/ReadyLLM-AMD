@@ -100,3 +100,6 @@ Il pannello «Motori di inferenza» in basso elenca tutte le build trovate (es. 
 
 ## 19. Barra di progresso del tuning (v1.1.20)
 Durante il tuning, sotto i grafici del Monitoraggio compare una barra con la fase (baseline, coarse, fine), le prove completate sul totale stimato (il totale cresce se la fase fine ne richiede di piu') e le ultime righe del log, nascondibili con «Nascondi log».
+
+## 20. Temperatura GPU (v1.1.21)
+Su Windows la temperatura nel Monitoraggio e' letta come in Gestione attivita'. Se mostra «--» il driver non espone il dato (o la lettura e' fallita).
