@@ -96,6 +96,34 @@ def test_connection(req: TargetRequest):
 
 
 
+@router.get("/{target_id}/engines-installed")
+def engines_installed(target_id: str):
+    """[2026-10-01 v1.1.14] llama-server installati sulla macchina, con backend rilevato e quale e' attivo."""
+    target = get_target(target_id)
+    if not target:
+        return {"builds": [], "message": "Macchina target inesistente"}
+    executor = make_executor(target)
+    try:
+        return {"builds": installer.find_llama_installs(executor, target)}
+    finally:
+        executor.close()
+
+
+class ActivateRequest(BaseModel):
+    path: str
+
+
+@router.post("/{target_id}/activate-engine")
+def activate_engine(target_id: str, req: ActivateRequest):
+    """[2026-10-01 v1.1.14] «Attiva»: imposta il percorso del motore (engine_path) su una build installata."""
+    target = get_target(target_id)
+    if not target:
+        return {"ok": False, "message": "Macchina target inesistente"}
+    target.engine_path = req.path
+    targets = upsert_target(target)
+    return {"ok": True, "targets": [t.to_dict() for t in targets]}
+
+
 @router.get("/{target_id}/engine")
 def check_engine(target_id: str):
     """Rileva se sulla macchina target e' installato il motore di inferenza"""
@@ -111,6 +139,7 @@ def check_engine(target_id: str):
 
 class InstallRequest(BaseModel):
     target_id: str
+    backend: Optional[str] = None   # [2026-10-01 v1.1.14] auto|cuda|rocm|vulkan|cpu (solo llama.cpp)
 
 
 @router.post("/install-engine")
@@ -119,7 +148,7 @@ def install_engine(req: InstallRequest):
     target = get_target(req.target_id)
     if not target:
         return {"ok": False, "message": "Macchina target inesistente"}
-    job_id = installer.start_install(target)
+    job_id = installer.start_install(target, req.backend)
     return {"ok": True, "job_id": job_id}
 
 

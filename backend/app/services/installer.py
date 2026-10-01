@@ -119,6 +119,37 @@ def detect_llama_backends(executor: Executor, target: Target, exe: str) -> dict:
     return {"backends": backends, "backend": "+".join(backends) if backends else "cpu", "devices": devices}
 
 
+def find_llama_installs(executor: Executor, target: Target) -> list:
+    """[2026-10-01 v1.1.14] Elenca i llama-server installati sulla macchina: C:\\llama\\<backend>\\... (Windows),
+    /tmp/llama.cpp-<backend>/build/bin (Linux), nel PATH, piu' quello attualmente configurato.
+    Per ognuno rileva il backend (detect_llama_backends). Serve al pulsante «Attiva» di Impostazioni."""
+    paths = []
+    if target.os == "windows":
+        r = executor.run('dir /s /b "C:\\llama\\llama-server.exe" 2>nul', timeout=20)
+        paths += [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip().lower().endswith("llama-server.exe")]
+    else:
+        r = executor.run("ls /tmp/llama.cpp-*/build/bin/llama-server 2>/dev/null; command -v llama-server", timeout=15)
+        paths += [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip().endswith("llama-server")]
+    cur = (target.engine_path or "").strip()
+    norm = lambda p: p.replace("/", "\\").lower() if target.os == "windows" else p
+    if cur and norm(cur) not in [norm(p) for p in paths]:
+        exists = executor.run(
+            f'if exist "{cur}" (echo FOUND)' if target.os == "windows" else f'test -f "{cur}" && echo FOUND', timeout=8)
+        if "FOUND" in (exists.stdout or ""):
+            paths.append(cur)
+    out = []
+    for p in paths:
+        info = detect_llama_backends(executor, target, p)
+        if not info["backends"]:
+            # Nessun indizio dai file/dispositivi: si usa il nome della cartella (C:\\llama\\vulkan\\...)
+            hint = _backend_da_testo(p)
+            if hint:
+                info["backend"] = "+".join(hint) + "?"
+        out.append({"path": p, "backend": info["backend"], "devices": info["devices"],
+                    "active": bool(cur) and norm(p) == norm(cur)})
+    return out
+
+
 def _detect_llama(executor: Executor, target: Target) -> dict:
     """Rileva se il binario llama-server esiste"""
     exe = target.engine_path
@@ -635,8 +666,12 @@ def _install_comfyui(executor: Executor, job_id: str, target: Target) -> str:
 
 # ==================== Esecuzione in background ====================
 
-def start_install(target: Target) -> str:
-    """Avvia il task di installazione, restituisce job_id"""
+def start_install(target: Target, backend: Optional[str] = None) -> str:
+    """Avvia il task di installazione, restituisce job_id
+    [2026-10-01 v1.1.14] backend: scelta fatta nella riga del motore (auto/cuda/rocm/vulkan/cpu), valida subito senza
+    dover prima salvare le Impostazioni. Versione precedente: def start_install(target: Target) -> str"""
+    if backend and backend in LLAMA_BACKENDS:
+        target.llama_backend = backend
     job_id = uuid.uuid4().hex[:8]
     with _LOCK:
         _JOBS[job_id] = {

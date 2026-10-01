@@ -430,6 +430,9 @@ function EngineRow({ target, onChanged }) {
   const [engine, setEngine] = useState(null)
   const [logs, setLogs] = useState([])
   const [showLogs, setShowLogs] = useState(false)
+  // [2026-10-01 v1.1.14] build installate (con pulsante «Attiva») e scelta del backend da installare
+  const [builds, setBuilds] = useState([])
+  const [installBackend, setInstallBackend] = useState(target.llama_backend || 'auto')
   const pollRef = useRef(null)
 
   async function check() {
@@ -439,15 +442,38 @@ function EngineRow({ target, onChanged }) {
       const d = await res.json()
       setEngine(d)
       setState(d.installed ? 'installed' : 'missing')
+      if (target.engine_type === 'llama_cpp') loadBuilds()
     } catch {
       setState('missing')
+    }
+  }
+
+  async function loadBuilds() {
+    try {
+      const r = await fetch(`/api/target/${target.id}/engines-installed`)
+      const d = await r.json()
+      setBuilds(d.builds || [])
+    } catch { /* ignora */ }
+  }
+
+  // «Attiva»: imposta il percorso del motore su questa build, senza digitare nulla
+  async function activate(path) {
+    const r = await fetch(`/api/target/${target.id}/activate-engine`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    })
+    const d = await r.json()
+    if (d.ok) {
+      if (onChanged) onChanged()
+      await check()
     }
   }
 
   useEffect(() => {
     check()
     return () => clearInterval(pollRef.current)
-  }, [target.id])
+  }, [target.id, target.engine_path])
 
   async function install() {
     setState('installing')
@@ -456,7 +482,8 @@ function EngineRow({ target, onChanged }) {
     const res = await fetch('/api/target/install-engine', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ target_id: target.id }),
+      // [2026-10-01 v1.1.14] backend scelto nella riga del motore (non serve salvare prima le Impostazioni)
+      body: JSON.stringify({ target_id: target.id, backend: target.engine_type === 'llama_cpp' ? installBackend : undefined }),
     })
     const d = await res.json()
     if (!d.ok) {
@@ -517,7 +544,8 @@ function EngineRow({ target, onChanged }) {
         </div>
         <div className="flex items-center gap-3">
           <span className={`text-xs px-2 py-1 rounded-full ${badge.cls}`}>{badge.text}</span>
-          {state === 'missing' && (
+          {/* llama.cpp: il pulsante Installa e' nella sezione build (sotto), sempre disponibile; qui resta per gli altri motori */}
+          {state === 'missing' && target.engine_type !== 'llama_cpp' && (
             <button
               onClick={install}
               className="bg-blue text-bg text-sm font-semibold px-4 py-1.5 rounded-lg hover:opacity-90 transition"
@@ -533,6 +561,41 @@ function EngineRow({ target, onChanged }) {
 
       {engine?.installed && engine.path && (
         <div className="text-xs text-gray/70 mt-2 truncate">{t('settings.path')} {engine.path}</div>
+      )}
+
+      {/* [2026-10-01 v1.1.14] Build installate con «Attiva» + installazione di una nuova build (anche se ne esiste gia' una) */}
+      {target.engine_type === 'llama_cpp' && (
+        <div className="mt-3 pt-3 border-t border-gray/20">
+          {builds.length > 0 && (
+            <div className="space-y-1.5 mb-3">
+              <div className="text-xs text-gray">{t('settings.installedBuilds')}</div>
+              {builds.map(b => (
+                <div key={b.path} className="flex items-center gap-2 text-xs">
+                  <span className="px-2 py-0.5 rounded bg-purple/15 text-purple font-semibold uppercase shrink-0">{b.backend || 'cpu'}</span>
+                  <span className="truncate text-gray/80 flex-1" title={b.path}>{b.path}</span>
+                  {b.active
+                    ? <span className="px-2 py-1 rounded bg-green/20 text-green font-semibold shrink-0">{t('settings.inUse')}</span>
+                    : <button onClick={() => activate(b.path)}
+                        className="px-3 py-1 rounded-lg bg-green text-bg font-semibold hover:opacity-90 transition shrink-0">
+                        {t('settings.activate')}
+                      </button>}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-gray">{t('settings.installBackend')}</span>
+            <select value={installBackend} onChange={e => setInstallBackend(e.target.value)} disabled={state === 'installing'}
+              className="bg-bg border border-gray/40 rounded-lg px-2 py-1 text-fg">
+              {[['auto', t('settings.backend.auto')], ['vulkan', 'Vulkan'], ['rocm', 'ROCm (HIP)'], ['cuda', 'CUDA'], ['cpu', 'CPU']]
+                .map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+            <button onClick={install} disabled={state === 'installing'}
+              className="bg-blue text-bg font-semibold px-3 py-1 rounded-lg hover:opacity-90 transition disabled:opacity-40">
+              {state === 'installing' ? t('settings.badge.installing') : t('settings.install')}
+            </button>
+          </div>
+        </div>
       )}
 
       {(showLogs && logs.length > 0) && (
