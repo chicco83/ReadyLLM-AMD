@@ -1,6 +1,6 @@
 # CONTEXT — ReadyLLM-AMD
 
-Versione: **1.1.12** — 2026-10-01 22:39
+Versione: **1.1.13** — 2026-10-01 22:40
 
 ## Scopo
 Assistente di deploy/tuning/monitoraggio per LLM locali (llama.cpp, vLLM, SGLang) e generazione video
@@ -87,3 +87,6 @@ Il tuning intelligente (automatico + AI) e' una sezione della pagina Monitoraggi
 - Avvio llama-server (target locale Windows): `Start-Process -WindowStyle Hidden` invece di schtasks (resta schtasks per SSH). Causa della «shell nera»: con v1.1.8 l'output e' rediretto su `C:\temp\llama_server.log`, quindi la finestra visibile restava vuota. Nuovo `GET /api/deploy/log` e pulsante «Log del motore» nel Deploy.
 - «Si avvia due volte»: il tuning ferma il server del Deploy e lo riavvia a ogni prova (comportamento voluto); ora lo dichiara nel log del tuning.
 - UI: Deploy e Tuning sono sotto il Monitoraggio (`<Deploy embedded />` in `Monitor.jsx`), con due pulsanti a passaggi evidenziati «1 Deploy ➜ 2 Tuning»; voce di menu «Deploy» rimossa; menu «Monitoraggio e deploy».
+
+## Aggiornamento 1.1.13 — GPU non usata
+Segnalazione: nel monitoraggio GPU 0%, VRAM 3 GB/15.8, CPU 71%, 7.7 t/s con un 9B Q8_0 = modello su CPU. Causa probabile: llama-server CPU/CUDA (installato prima di v1.1.0, quando l'installer scaricava sempre CUDA) invece di Vulkan/ROCm. `GET /api/deploy/log` ora restituisce `offload` ("offloaded N/M layers to GPU") e `gpu_devices`; la pagina Deploy mostra un avviso se N=0. Non verificato sul PC reale.

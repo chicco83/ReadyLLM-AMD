@@ -1,8 +1,11 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.12** — 2026-10-01 22:39
+Versione corrente: **1.1.13** — 2026-10-01 22:40
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 15. v1.1.13 — 2026-10-01 22:40 — Diagnosi GPU non usata
+- `/api/deploy/log` analizza il log (strati su GPU, dispositivi); il Deploy avvisa quando 0 strati sono offloadati e mostra «GPU in uso: N/M strati».
 
 ## 14. v1.1.12 — 2026-10-01 22:39 — Motore nascosto con log, Deploy e Tuning sotto il monitoraggio
 - Windows (target locale): llama-server avviato con finestra nascosta; log visibile da «Log del motore» (`GET /api/deploy/log`).
