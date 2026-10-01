@@ -349,49 +349,58 @@ def _parse_tag(testo: str) -> str:
 
 
 def _win_release_urls(executor: Executor, job_id: str):
-    """Restituisce (urls, tag) dell'ultima release di llama.cpp (API, poi ripiego HTML).
+    """Restituisce (urls, tag) della release di llama.cpp piu' recente CHE CONTIENE pacchetti Windows.
 
-    [2026-10-01 v1.1.15] Ora restituisce anche il TAG della release (es. b11327) e registra nel log quanti asset sono stati
-    trovati e da quale fonte: serve a ricostruire gli URL a mano (vedi _candidate_win_urls) se l'elenco e' vuoto o incompleto,
-    e a capire dal log cosa e' successo. Versione precedente: restituiva solo la lista di URL.
+    [2026-10-01 v1.1.16] Prima si usava /releases/latest, ma su ggml-org/llama.cpp il badge «Latest» puo' puntare a una
+    release non binaria (osservato: tag v0.5.0 con 1 solo asset, mentre i pacchetti sono nelle release bNNNNN).
+    Ora si legge l'ELENCO delle release (dalla piu' recente) e si prende la prima con almeno un asset «bin-win».
+    Fonti: API (releases?per_page=20), poi la pagina HTML github.com/.../releases con expanded_assets del primo tag bNNNN.
+    Versione precedente (v1.1.15): usava /releases/latest e la redirect di /releases/latest.
     """
     _append_log(job_id, "▶ Ricerca dell'ultima release precompilata")
     api = executor.run(
         'powershell -NoProfile -Command "' + _PS_PRE +
-        "try { $r=Invoke-RestMethod -Uri 'https://api.github.com/repos/ggml-org/llama.cpp/releases/latest' "
-        "-Headers $h -TimeoutSec 30; Write-Output ('TAG=' + $r.tag_name); "
-        "$r.assets | ForEach-Object { Write-Output $_.browser_download_url } } "
+        "try { $rs=Invoke-RestMethod -Uri 'https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=20' "
+        "-Headers $h -TimeoutSec 30; foreach ($r in $rs) { if (-not $r.draft) { Write-Output ('REL=' + $r.tag_name); "
+        "$r.assets | ForEach-Object { Write-Output $_.browser_download_url } } } } "
         "catch { Write-Output ('ERR=' + $_.Exception.Message) }\"", timeout=60)
-    urls = [ln.strip() for ln in (api.stdout or "").splitlines() if ln.strip().startswith("http")]
-    tag = _parse_tag(api.stdout)
-    if urls:
-        _append_log(job_id, f"  Release {tag or '?'}: {len(urls)} asset (fonte: API GitHub)")
-        return urls, tag
+    rilasci, cur = [], None          # [(tag, [urls])] dalla piu' recente
+    for ln in (api.stdout or "").splitlines():
+        ln = ln.strip()
+        if ln.startswith("REL="):
+            cur = (ln[4:], [])
+            rilasci.append(cur)
+        elif ln.startswith("http") and cur is not None:
+            cur[1].append(ln)
+    for tag, urls in rilasci:
+        if any("bin-win" in u for u in urls):
+            _append_log(job_id, f"  Release {tag}: {len(urls)} asset (fonte: API GitHub)")
+            return urls, tag
     err = next((ln for ln in (api.stdout or "").splitlines() if ln.startswith("ERR=")), "") or (api.stderr or "")[:200]
-    _append_log(job_id, f"  API GitHub senza asset ({(err or 'risposta vuota').strip()}), provo la pagina HTML delle release")
-    # Ripiego: tag dalla redirect di /releases/latest, poi pagina expanded_assets (non soggetta al limite dell'API)
+    elenco = ", ".join(f"{t}({len(u)})" for t, u in rilasci[:5]) or "nessuna"
+    _append_log(job_id, f"  API GitHub: nessuna release con pacchetti Windows (viste: {elenco}; {(err or 'ok').strip()}), provo la pagina HTML")
     html = executor.run(
         'powershell -NoProfile -Command "' + _PS_PRE +
-        "try { $t=(Invoke-WebRequest -Uri 'https://github.com/ggml-org/llama.cpp/releases/latest' -UseBasicParsing "
-        "-Headers $h -TimeoutSec 30).BaseResponse.ResponseUri.AbsoluteUri.Split('/')[-1]; Write-Output ('TAG=' + $t); "
+        "try { $p=(Invoke-WebRequest -Uri 'https://github.com/ggml-org/llama.cpp/releases' -UseBasicParsing "
+        "-Headers $h -TimeoutSec 30).Content; $m=[regex]::Match($p,'/releases/tag/(b\\d+)'); $t=$m.Groups[1].Value; "
+        "Write-Output ('TAG=' + $t); "
         "(Invoke-WebRequest -Uri ('https://github.com/ggml-org/llama.cpp/releases/expanded_assets/' + $t) "
         "-UseBasicParsing -Headers $h -TimeoutSec 30).Content } "
         "catch { Write-Output ('ERR=' + $_.Exception.Message) }\"", timeout=90)
     out = html.stdout or ""
-    tag = _parse_tag(out) or tag
-    # href relativi o assoluti, .zip e .tar.gz; si tiene tutto e si filtra dopo
+    tag = _parse_tag(out)
     hrefs = re.findall(r'href="((?:https://github\.com)?/ggml-org/llama\.cpp/releases/download/[^"]+)"', out)
     urls = [h if h.startswith("http") else "https://github.com" + h for h in hrefs]
     if urls:
         _append_log(job_id, f"  Release {tag or '?'}: {len(urls)} asset (fonte: pagina HTML)")
         return urls, tag
     if tag:
-        # Nessun elenco ma il tag e' noto: gli URL si ricostruiscono dal nome standard (_candidate_win_urls)
+        # Nessun elenco ma il tag bNNNN e' noto: gli URL si ricostruiscono dal nome standard (_candidate_win_urls)
         _append_log(job_id, f"  Elenco asset non disponibile: uso il tag {tag} e i nomi standard dei pacchetti")
         return [], tag
     err = next((ln for ln in out.splitlines() if ln.startswith("ERR=")), "") or (html.stderr or "")[:200]
     raise RuntimeError(
-        "Impossibile contattare GitHub dalla macchina target (" + err.strip() + "). Controllare rete, proxy/firewall "
+        "Impossibile trovare una release con pacchetti Windows (" + err.strip() + "). Controllare rete, proxy/firewall "
         "e data/ora di sistema; in alternativa impostare READYLLM_GH_PROXY con un mirror di GitHub, oppure scaricare "
         "manualmente il pacchetto da https://github.com/ggml-org/llama.cpp/releases e indicare il percorso di llama-server.exe nelle Impostazioni")
 
