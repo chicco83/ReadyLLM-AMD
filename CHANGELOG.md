@@ -1,8 +1,11 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.25** — 2026-10-02 01:50
+Versione corrente: **1.1.26** — 2026-10-02 02:10
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 28. v1.1.26 — 2026-10-02 02:10 — Deploy: «misurati t/s» corretto
+- Il Deploy mostrava come «misurati X t/s» il punteggio composito del tuning (es. 42.61) invece della decodifica reale. Ora il tuning (salvataggio automatico e «Salva e applica») registra i t/s di decodifica. I valori gia' salvati restano errati finche' non si rifa un tuning per quel modello.
 
 ## 27. v1.1.25 — 2026-10-02 01:50 — Tuning: mai consigliare una config peggiore della baseline
 - Bug: veniva consigliato il risultato dell'ultima fase (fine) anche se piu' lento della baseline (68.23 -> 65.5 t/s, -4%): la stessa riga misurata tre volte dava 68.2/66.0/65.5 per rumore di misura.

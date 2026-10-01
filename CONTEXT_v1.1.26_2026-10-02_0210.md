@@ -122,3 +122,5 @@ Rimossa da `EngineRow` la sezione «Build installate / Attiva / Installa»; spos
 - v1.1.24: `services/tune_log.py` (lista di voci per tuning), job con `ts_start`+`meta` (engine/gpu/model_size), pagina `History.jsx`, voce di menu `history`; fix temperatura: buffer P azzerato con StructureToPtr.
 
 - v1.1.25: tuner worker sceglie `max(score)` su all_results con soglia 3% sulla baseline; `_coarse_search(baseline_result=...)` riusa la misura se la config e' identica; `_finalize` marca `recommended` per identita'.
+
+- v1.1.26: `tune_history.score` ora = decodifica t/s (tuner._finalize e Tune.saveBest); il punteggio composito resta solo in tune_log/risultati.

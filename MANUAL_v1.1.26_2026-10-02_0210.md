@@ -115,3 +115,6 @@ Voce di menu «Storico ottimizzazioni»: elenca tutti i tuning conclusi (anche f
 
 ## 24. Come sceglie il tuning (v1.1.25)
 La configurazione consigliata e' la migliore per punteggio tra baseline e prove; una variante prevale sulla tua configurazione solo se e' migliore di almeno il 3% (le misure hanno rumore di qualche punto percentuale). Se nessuna variante vince, resta consigliata la configurazione attuale. La tabella «Tutti i record dei test» e' lo storico della singola esecuzione; lo «Storico ottimizzazioni» nel menu raccoglie tutte le esecuzioni.
+
+## 25. Valore «misurati» nel Deploy (v1.1.26)
+Il numero accanto a «Precompilato dal tuning automatico» e' la velocita' di decodifica in t/s della configurazione consigliata (prima era il punteggio composito). Per aggiornare un valore vecchio basta rieseguire il tuning del modello.
