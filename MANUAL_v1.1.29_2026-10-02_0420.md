@@ -132,3 +132,8 @@ Con piu' build GPU installate (Impostazioni → Motori di inferenza) compare «P
 - Obiettivo **Coding e agenti**: ogni prova usa `--parallel 1 --cache-reuse 256`; il prefill e' misurato anche su ~16k token (serve un contesto di almeno 20000; sotto, resta solo la misura da ~2400). Il tempo di ogni prova cresce di qualche secondo.
 - Fase fine: oltre a batch/ubatch/threads/draft si prova `flash-attn` acceso/spento (solo con cache f16; con cache quantizzata la flash attention e' obbligatoria).
 - Limite noto: il benchmark usa richieste indipendenti, quindi il beneficio reale di `--cache-reuse` (stesso prefisso a ogni richiesta dell'agente) non e' misurato ma e' applicato.
+
+## 29. Monitoraggio: effetto del tuning e decodifica speculativa (v1.1.29)
+- **Effetto del tuning:** sotto i grafici, prima/dopo dell'ultimo tuning concluso e tabella degli ultimi sei.
+- **Decodifica speculativa:** scheda sopra i grafici; mostra se il modello usa MTP/ngram (letto dai parametri dell'ultimo avvio dal Deploy: se il modello e' stato avviato altrove risulta «sconosciuta»). MTP sta nella memoria del modello (VRAM con n-gpu-layers all); ngram usa la cronologia dei token (CPU/RAM). Nessuno dei due usa il disco/SSD.
+- **ROCm su CPU:** se il confronto tra motori dice «saltato: --list-devices non elenca nessuna GPU», la build ROCm non vede la scheda (driver AMD con HIP non installato o GPU non supportata dalla build). Verifica a mano con `C:\llama\rocm\llama-server.exe --list-devices`.

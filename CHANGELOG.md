@@ -1,8 +1,13 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.28** — 2026-10-02 03:40
+Versione corrente: **1.1.29** — 2026-10-02 04:20
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 31. v1.1.29 — 2026-10-02 04:20 — Prima/dopo nel Monitoraggio, decodifica speculativa, motori su CPU
+- Il grafico «Utilizzo dei token (per giorno)» e' sostituito dal pannello **Effetto del tuning**: grafico prima/dopo dell'ultimo tuning (decodifica, prefill, TTFT, motore) + tabella degli ultimi tuning (da `GET /api/tune/history`).
+- Bug confronto motori: una build ROCm con la DLL HIP ma senza GPU visibile partiva e lavorava sulla CPU (CPU 100%) venendo confrontata come GPU. Ora il tuner salta le build il cui `--list-devices` non elenca GPU e scarta le misure con «offloaded 0/N layers to GPU» (nota nel log).
+- Nuova scheda **Decodifica speculativa** nel Monitoraggio: tipo in uso (spento / MTP / ngram / draft), n-max, accettazione, KV cache e dove vive in memoria (`GET /api/deploy/spec`, parametri dell'ultimo avvio dal Deploy in `running_args.json`). MTP non usa RAM di sistema (VRAM con ngl all) e ngram non usa l'SSD.
 
 ## 30. v1.1.28 — 2026-10-02 03:40 — Tuning: miglioramenti dalla ricerca online (AMD/Windows)
 - **Sonda flash-attention** nella fase fine (`--flash-attn on/off`): su Vulkan/AMD il kernel FA puo' essere piu' lento. Applicabile solo con KV cache f16 (la cache quantizzata richiede FA): altrimenti saltata con nota nel log. Vince solo con +3% (`NOISE_MARGIN`).
