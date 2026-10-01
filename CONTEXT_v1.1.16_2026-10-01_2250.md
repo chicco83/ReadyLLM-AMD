@@ -1,6 +1,6 @@
 # CONTEXT — ReadyLLM-AMD
 
-Versione: **1.1.15** — 2026-10-01 22:49
+Versione: **1.1.16** — 2026-10-01 22:50
 
 ## Scopo
 Assistente di deploy/tuning/monitoraggio per LLM locali (llama.cpp, vLLM, SGLang) e generazione video
@@ -97,3 +97,6 @@ Segnalazione: nel monitoraggio GPU 0%, VRAM 3 GB/15.8, CPU 71%, 7.7 t/s con un 9
 
 ## Aggiornamento 1.1.15 — installazione Windows: asset non trovati
 Segnalazione: «Nessun pacchetto Windows per il backend cpu... Asset Windows disponibili: nessuno» per tutti i backend, benche' la release b11327 abbia i pacchetti (`llama-<tag>-bin-win-{cpu,vulkan,cuda-12.4,cuda-13.4,rocm-10.0}-x64.zip`, `cudart-llama-bin-win-cuda-12.4-x64.zip`). La causa dell'elenco vuoto sul PC non e' stata riprodotta (nel cloud GitHub e' bloccato). Correzioni: `_win_release_urls` restituisce (urls, tag) e logga fonte e conteggio; ripiego HTML piu' tollerante (href relativi/assoluti, anche .tar.gz); se l'elenco manca ma il tag e' noto, `_candidate_win_urls` ricostruisce gli URL dai nomi standard e li prova in ordine; pattern ROCm aggiornato a `bin-win-rocm` (prima `hip-radeon`); cudart ricostruito dal tag. Da verificare sul PC reale: il log ora dice quale fonte ha risposto.
+
+## Aggiornamento 1.1.16 — release «latest» sbagliata
+Dal log dell'utente: `/releases/latest` di ggml-org/llama.cpp restituisce il tag `v0.5.0` con 1 solo asset (non binario), mentre i pacchetti sono nelle release `bNNNNN` (es. b11327). Ora `_win_release_urls` legge `releases?per_page=20` e sceglie la prima release (dalla piu' recente) con almeno un asset `bin-win`; ripiego sulla pagina HTML delle release (primo tag `bNNNN`, expanded_assets) e sui nomi standard. Anche l'estrazione cudart parte dal tag corretto.

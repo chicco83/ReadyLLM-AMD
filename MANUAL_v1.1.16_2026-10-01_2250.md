@@ -1,6 +1,6 @@
 # MANUALE — ReadyLLM-AMD
 
-Versione: **1.1.15** — 2026-10-01 22:49
+Versione: **1.1.16** — 2026-10-01 22:50
 
 ## 1. Avvio
 Dalla radice del progetto: `python avvia.py` (backend + frontend), `python avvia.py --installa` (installa prima le dipendenze), `python avvia.py --comandi` (stampa i comandi manuali), `--backend` / `--frontend` per avviarne uno solo. Ctrl+C li ferma entrambi. Comandi manuali:
@@ -88,3 +88,6 @@ Nel pannello «Motori di inferenza», per llama.cpp: elenco delle build trovate 
 
 ## 18. Installazione: «Nessun pacchetto Windows» 
 Nel log di installazione ora compare «Release bNNNN: N asset (fonte: API GitHub / pagina HTML)» oppure «uso il tag ... e i nomi standard». Se il download fallisce con 404/errore di rete, il log elenca ogni URL provato. Con `READYLLM_GH_PROXY` si puo' usare un mirror di GitHub.
+
+## 19. Installazione: release trovata
+Il log mostra «Release bNNNNN: N asset (fonte: ...)»: se vedi un tag diverso da bNNNNN (es. v0.5.0) segnalalo. Il tag deve iniziare per `b`.
