@@ -161,8 +161,13 @@ def _append_log(job_id: str, line: str):
             job["logs"].append({"t": time.strftime("%H:%M:%S"), "msg": line})
 
 
-def _run_step(executor: Executor, job_id: str, cmd: str, desc: str, timeout: int = 600):
-    """Esegue un passo e ne registra il log, restituisce ExecResult"""
+def _run_step(executor: Executor, job_id: str, cmd: str, desc: str, timeout: int = 600,
+              check: bool = False):
+    """Esegue un passo e ne registra il log, restituisce ExecResult.
+
+    [2026-10-01 v1.1.1] check=True: se il comando fallisce solleva RuntimeError con l'errore reale
+    (prima i passi critici come download/clone fallivano in silenzio e l'errore compariva solo
+    dopo, come messaggio generico)."""
     _append_log(job_id, f"▶ {desc}")
     result = executor.run(cmd, timeout=timeout)
     for ln in (result.stdout or "").splitlines()[-5:]:
@@ -172,6 +177,9 @@ def _run_step(executor: Executor, job_id: str, cmd: str, desc: str, timeout: int
         for ln in (result.stderr or "").splitlines()[-5:]:
             if ln.strip():
                 _append_log(job_id, f"  [err] {ln.strip()}")
+        if check:
+            detail = (result.stderr or result.stdout or "").strip().splitlines()
+            raise RuntimeError(f"Passo non riuscito: {desc}. {detail[-1] if detail else 'nessun dettaglio'}")
     return result
 
 
@@ -231,6 +239,88 @@ _WIN_ASSET_PATTERNS = {
 }
 
 
+# ==================== Rete: elenco release e download robusti (v1.1.1, 2026-10-01) ====================
+# Problemi corretti nell'installazione con un clic quando compariva «errore di rete»:
+#  - TLS: PowerShell 5.1 su Windows puo' usare TLS 1.0/1.1 per default e GitHub lo rifiuta -> si forza TLS 1.2
+#  - L'API api.github.com ha un limite di 60 richieste/ora per IP (HTTP 403) ed e' spesso bloccata da
+#    proxy/firewall: se fallisce, si ripiega sulla pagina HTML delle release (github.com/.../expanded_assets/<tag>)
+#  - L'errore reale veniva scartato: ora e' scritto nel log
+#  - Mirror opzionale: variabile d'ambiente READYLLM_GH_PROXY (es. "https://ghfast.top/") anteposta agli URL
+#    di download, utile dove github.com e' lento/irraggiungibile
+import os
+import re
+
+_PS_PRE = ("[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; "
+           "$ProgressPreference='SilentlyContinue'; $h=@{'User-Agent'='ReadyLLM'}; ")
+
+
+def _gh_proxy() -> str:
+    p = os.environ.get("READYLLM_GH_PROXY", "").strip()
+    return p if not p or p.endswith("/") else p + "/"
+
+
+def _win_release_urls(executor: Executor, job_id: str) -> list:
+    """Elenca gli URL degli asset dell'ultima release di llama.cpp (API, poi ripiego HTML)."""
+    _append_log(job_id, "▶ Ricerca dell'ultima release precompilata")
+    api = executor.run(
+        'powershell -NoProfile -Command "' + _PS_PRE +
+        "try { $r=Invoke-RestMethod -Uri 'https://api.github.com/repos/ggml-org/llama.cpp/releases/latest' "
+        "-Headers $h -TimeoutSec 30; $r.assets | ForEach-Object { Write-Output $_.browser_download_url } } "
+        "catch { Write-Output ('ERR=' + $_.Exception.Message) }\"", timeout=60)
+    urls = [ln.strip() for ln in (api.stdout or "").splitlines() if ln.strip().startswith("http")]
+    if urls:
+        return urls
+    err = next((ln for ln in (api.stdout or "").splitlines() if ln.startswith("ERR=")), "") or (api.stderr or "")[:200]
+    _append_log(job_id, f"  API GitHub non disponibile ({err.strip()}), provo la pagina HTML delle release")
+    # Ripiego: tag dalla redirect di /releases/latest, poi pagina expanded_assets (non soggetta al limite dell'API)
+    html = executor.run(
+        'powershell -NoProfile -Command "' + _PS_PRE +
+        "try { $t=(Invoke-WebRequest -Uri 'https://github.com/ggml-org/llama.cpp/releases/latest' -UseBasicParsing "
+        "-Headers $h -TimeoutSec 30).BaseResponse.ResponseUri.AbsoluteUri.Split('/')[-1]; "
+        "(Invoke-WebRequest -Uri ('https://github.com/ggml-org/llama.cpp/releases/expanded_assets/' + $t) "
+        "-UseBasicParsing -Headers $h -TimeoutSec 30).Content } "
+        "catch { Write-Output ('ERR=' + $_.Exception.Message) }\"", timeout=90)
+    out = html.stdout or ""
+    urls = ["https://github.com" + m for m in re.findall(r'href="(/ggml-org/llama\.cpp/releases/download/[^"]+\.zip)"', out)]
+    if not urls:
+        err = next((ln for ln in out.splitlines() if ln.startswith("ERR=")), "") or (html.stderr or "")[:200]
+        raise RuntimeError(
+            "Impossibile contattare GitHub dalla macchina target (" + err.strip() + "). Controllare rete, proxy/firewall "
+            "e data/ora di sistema; in alternativa impostare READYLLM_GH_PROXY con un mirror di GitHub, oppure scaricare "
+            "manualmente il pacchetto da https://github.com/ggml-org/llama.cpp/releases e indicare il percorso di llama-server.exe nelle Impostazioni")
+    return urls
+
+
+def _pick_win_asset(urls: list, backend: str) -> str:
+    for pat in _WIN_ASSET_PATTERNS.get(backend, []):
+        for u in urls:
+            name = u.rsplit("/", 1)[-1].lower()
+            if pat in name and "x64" in name and not name.startswith("cudart") and name.endswith(".zip"):
+                return u
+    return ""
+
+
+def _win_download(executor: Executor, job_id: str, url: str, dest: str, desc: str):
+    """Scarica un file con TLS 1.2, fino a 3 tentativi, poi (se configurato) tramite mirror; verifica la dimensione."""
+    candidates = [url]
+    if _gh_proxy():
+        candidates.append(_gh_proxy() + url)
+    last = ""
+    for cand in candidates:
+        for attempt in (1, 2, 3):
+            r = _run_step(
+                executor, job_id,
+                'powershell -NoProfile -Command "' + _PS_PRE +
+                f"Invoke-WebRequest -Uri '{cand}' -OutFile '{dest}' -UseBasicParsing -Headers $h -TimeoutSec 900; "
+                f"if ((Get-Item '{dest}').Length -lt 1048576) {{ throw 'file scaricato troppo piccolo' }}\"",
+                f"{desc} (tentativo {attempt}/3)", timeout=1000)
+            if r.ok:
+                return
+            last = (r.stderr or r.stdout or "").strip().splitlines()[-1:] or ["errore sconosciuto"]
+            last = last[0]
+    raise RuntimeError(f"Download non riuscito da {url}: {last}")
+
+
 # ==================== Script di installazione per piattaforma ====================
 
 def _install_windows(executor: Executor, job_id: str, target: Target) -> str:
@@ -246,40 +336,32 @@ def _install_windows(executor: Executor, job_id: str, target: Target) -> str:
     backend = resolve_llama_backend(executor, target)
     _append_log(job_id, f"▶ Backend llama.cpp selezionato: {backend.upper()} "
                         f"(impostazione: {getattr(target, 'llama_backend', 'auto')})")
-    list_cmd = (
-        'powershell -Command "'
-        "$ProgressPreference='SilentlyContinue'; "
-        "$r=Invoke-RestMethod -Uri 'https://api.github.com/repos/ggml-org/llama.cpp/releases/latest'; "
-        "$r.assets | ForEach-Object { Write-Output $_.browser_download_url }\""
-    )
-    _append_log(job_id, "▶ Ricerca dell'ultima release precompilata")
-    list_res = executor.run(list_cmd, timeout=60)
-    urls = [ln.strip() for ln in list_res.stdout.splitlines() if ln.strip().startswith("http")]
-    url = ""
-    for pat in _WIN_ASSET_PATTERNS.get(backend, []):
-        for u in urls:
-            name = u.rsplit("/", 1)[-1].lower()
-            if pat in name and "x64" in name and not name.startswith("cudart") and name.endswith(".zip"):
-                url = u
-                break
-        if url:
-            break
+    urls = _win_release_urls(executor, job_id)
+    url = _pick_win_asset(urls, backend)
     if not url:
         avail = ", ".join(u.rsplit("/", 1)[-1] for u in urls if "win" in u.lower()) or "nessuno"
         raise RuntimeError(
-            f"Nessun pacchetto Windows per il backend {backend} nell'ultima release "
-            f"(rete/GitHub non raggiungibile?). Asset Windows disponibili: {avail}")
+            f"Nessun pacchetto Windows per il backend {backend} nell'ultima release. "
+            f"Asset Windows disponibili: {avail}")
     _append_log(job_id, f"  Sorgente download: {url}")
 
     zip_path = r"C:\llama\llama.zip"
-    _run_step(executor, job_id,
-              f'powershell -Command "$ProgressPreference=\'SilentlyContinue\'; '
-              f'Invoke-WebRequest -Uri \'{url}\' -OutFile \'{zip_path}\'"',
-              "Download del pacchetto precompilato (puo' essere grande, attendere)", timeout=900)
-
+    _win_download(executor, job_id, url, zip_path, "Download del pacchetto precompilato (puo' essere grande, attendere)")
     _run_step(executor, job_id,
               f'powershell -Command "Expand-Archive -Path \'{zip_path}\' -DestinationPath \'{install_dir}\' -Force"',
-              "Decompressione del pacchetto di installazione")
+              "Decompressione del pacchetto di installazione", check=True)
+
+    # [2026-10-01 v1.1.1] Il pacchetto CUDA non contiene le DLL runtime CUDA: serve anche "cudart-...".
+    if backend == "cuda":
+        cudart = next((u for u in urls if u.rsplit("/", 1)[-1].lower().startswith("cudart")
+                       and "x64" in u.lower() and u.lower().endswith(".zip")), "")
+        if cudart:
+            cz = r"C:\llama\cudart.zip"
+            _win_download(executor, job_id, cudart, cz, "Download delle DLL runtime CUDA (cudart)")
+            _run_step(executor, job_id,
+                      f'powershell -Command "Expand-Archive -Path \'{cz}\' -DestinationPath \'{install_dir}\' -Force"',
+                      "Decompressione delle DLL CUDA", check=True)
+            # llama-server.exe puo' stare in una sottocartella: copia le DLL accanto all'eseguibile dopo la ricerca (sotto)
 
     # Individua llama-server.exe (dopo la decompressione si trova in una sottocartella)
     find_cmd = (
@@ -294,6 +376,11 @@ def _install_windows(executor: Executor, job_id: str, target: Target) -> str:
             break
     if not exe_path:
         raise RuntimeError("llama-server.exe non trovato dopo la decompressione")
+    if backend == "cuda":
+        exe_dir = exe_path.rsplit("\\", 1)[0]
+        if exe_dir.lower() != install_dir.lower():
+            executor.run(f'powershell -NoProfile -Command "Copy-Item -Path \'{install_dir}\\*.dll\' '
+                         f'-Destination \'{exe_dir}\' -Force"', timeout=60)
     _append_log(job_id, f"  Percorso del motore: {exe_path}")
     return exe_path
 
@@ -353,12 +440,12 @@ def _install_linux(executor: Executor, job_id: str, target: Target) -> str:
     """Compila llama.cpp dai sorgenti (CUDA / ROCm / Vulkan / CPU secondo il backend scelto)"""
     _run_step(executor, job_id,
               "command -v cmake && command -v git && command -v g++",
-              "Verifica delle dipendenze di compilazione (cmake/git/g++)", timeout=30)
+              "Verifica delle dipendenze di compilazione (cmake/git/g++)", timeout=30, check=True)
 
     build_dir = "/tmp/llama.cpp"
     _run_step(executor, job_id,
               f"rm -rf {build_dir} && git clone --depth 1 https://github.com/ggml-org/llama.cpp {build_dir}",
-              "Clonazione dei sorgenti di llama.cpp", timeout=600)
+              "Clonazione dei sorgenti di llama.cpp", timeout=600, check=True)
 
     # [2026-10-01 v1.1.0] Backend scelto (cuda/rocm/vulkan/cpu) -> flag cmake / variabili ambiente.
     # Versione precedente (sostituita): solo CUDA se nvcc presente, altrimenti CPU:
@@ -393,7 +480,7 @@ def _install_linux(executor: Executor, job_id: str, target: Target) -> str:
     _run_step(executor, job_id,
               f"cd {build_dir} && {env_prefix}cmake -B build {cmake_flag} -DCMAKE_BUILD_TYPE=Release "
               f"&& cmake --build build --config Release -j --target llama-server",
-              "Compilazione di llama-server" + f" ({backend.upper()})", timeout=2400)
+              "Compilazione di llama-server" + f" ({backend.upper()})", timeout=2400, check=True)
 
     exe_path = f"{build_dir}/build/bin/llama-server"
     check = executor.run(f'test -f "{exe_path}" && echo FOUND')
