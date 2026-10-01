@@ -13,6 +13,7 @@ from typing import Optional
 from .engine_adapter import EngineAdapter, StartParams  # noqa: F401  (re-export)
 from .llama_cpp import LlamaCppAdapter
 from .vllm import VLLMAdapter
+from .sglang import SGLangAdapter
 from .comfyui import ComfyUIAdapter
 from ..models.target import Target
 
@@ -20,10 +21,14 @@ from ..models.target import Target
 _ADAPTERS = {
     "llama_cpp": LlamaCppAdapter,
     "vllm": VLLMAdapter,
+    "sglang": SGLangAdapter,
     "comfyui": ComfyUIAdapter,
 }
 
 # engine_type -> 展示与能力元信息（前端配置页/部署页消费）
+# 注意：desc / install_hint / note / windows_note 这类面向用户的文案，前端已改为按界面语言
+# 从 frontend/src/i18n/translations.js 的 engine.<type>.<field> 键取值（见 Settings.jsx 的 engineText），
+# 此处保留同一份中文作为 API 默认值与降级兜底——改文案时请同步前端 i18n，否则界面上看不到变化。
 ENGINE_META = {
     "llama_cpp": {
         "label": "llama.cpp",
@@ -42,6 +47,16 @@ ENGINE_META = {
         "default_cmd": "vllm",
         # vLLM 不支持 Windows 原生，前端据此提示走 WSL2
         "windows_note": "vLLM 不支持 Windows 原生运行，请在 WSL2 (Linux) 中部署，或改用 llama.cpp",
+    },
+    "sglang": {
+        "label": "SGLang",
+        "desc": "高吞吐推理框架（RadixAttention 前缀缓存、多卡并行），需 NVIDIA GPU + CUDA，使用 HuggingFace 权重",
+        "supported_os": ["linux", "macos"],
+        "model_format": "safetensors",
+        "install_hint": "pip/uv 安装 sglang（需 Python 3.10+ 与 CUDA 环境）",
+        "default_cmd": "sglang",
+        # SGLang 官方安装说明面向 Linux + NVIDIA GPU
+        "windows_note": "SGLang 官方安装说明面向 Linux + NVIDIA GPU，请在 WSL2 (Linux) 中部署，或改用 llama.cpp",
     },
     "comfyui": {
         "label": "ComfyUI",

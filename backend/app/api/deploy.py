@@ -77,6 +77,14 @@ def list_models(target_id: str):
     """列出目标机器模型目录下的 .gguf 文件"""
     target, executor, _ = _adapter(target_id)
     try:
+        # vLLM / SGLang 加载 HuggingFace 权重（非 GGUF），模型目录扫描不适用，
+        # 返回明确提示，由用户在部署页直接填模型 ID 或本地权重目录。
+        engine_type = getattr(target, "engine_type", "llama_cpp") or "llama_cpp"
+        if engine_type in ("vllm", "sglang"):
+            return {
+                "models": [], "count": 0,
+                "error": f"{engine_type} 加载 HuggingFace 权重（非 GGUF），请直接填写模型 ID 或本地权重目录",
+            }
         if not target.models_dir:
             return {"models": [], "count": 0, "error": "未配置模型目录"}
         if target.os == "windows":
@@ -497,6 +505,20 @@ def default_args(target_id: str, model: str):
     target = get_target(target_id)
     if not target:
         raise HTTPException(status_code=404, detail="目标机器不存在")
+
+    # 0) 非 llama.cpp 引擎（vLLM / SGLang）：调优历史与确定性参数生成器都只面向
+    #    llama.cpp 参数体系，对它们不适用；直接返回该引擎适配器声明的通用默认参数。
+    engine_type = getattr(target, "engine_type", "llama_cpp") or "llama_cpp"
+    if engine_type in ("vllm", "sglang"):
+        from ..services import sglang, vllm
+        mod = sglang if engine_type == "sglang" else vllm
+        return {
+            "args": _ensure_port(" ".join(getattr(mod, "DEFAULT_ARGS", [])), target.service_port),
+            "source": "engine_default",
+            "score": 0,
+            "ts": "",
+            "reasoning": [f"{engine_type} 使用引擎通用默认参数（该引擎暂不支持自动调优）"],
+        }
 
     # 1) 优先：最近一次调优参数
     rec = tune_history.get_latest(target_id, model)

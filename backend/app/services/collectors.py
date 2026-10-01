@@ -186,6 +186,36 @@ def _collect_vllm_metrics(m: dict) -> dict:
     }
 
 
+def _collect_sglang_metrics(m: dict) -> dict:
+    """SGLang 引擎指标映射（Prometheus 格式，sglang: 前缀）
+
+    依据官方文档 references/production_metrics：SGLang 以 --enable-metrics 启动后
+    暴露 sglang:prompt_tokens_total / generation_tokens_total（counter）、
+    time_to_first_token_seconds / e2e_request_latency_seconds（histogram，
+    取 _sum）、cache_hit_rate（gauge，取值 0~1）。
+
+    与 vLLM 分支的差异：SGLang 直接给出 RadixAttention 前缀缓存命中率，
+    因此 cache_hit_rate 有真实值（换算成与 llama.cpp 一致的百分比口径）；
+    投机解码口径不同，返回 0。速度口径与 vLLM 分支保持一致。
+    """
+    prompt_tokens = m.get("sglang:prompt_tokens_total", 0)
+    completion_tokens = m.get("sglang:generation_tokens_total", 0)
+    # 耗时直方图的累计和（秒）
+    prompt_seconds = m.get("sglang:time_to_first_token_seconds_sum", 0)
+    e2e_seconds = m.get("sglang:e2e_request_latency_seconds_sum", 0)
+    # 官方文档示例为 0~1 的比值，前端与 llama.cpp 一致按百分比展示
+    cache_hit = m.get("sglang:cache_hit_rate", 0)
+
+    return {
+        "prompt_tokens": int(prompt_tokens),
+        "completion_tokens": int(completion_tokens),
+        "prompt_speed": round(prompt_tokens / prompt_seconds, 2) if prompt_seconds > 0 else 0,
+        "completion_speed": round(completion_tokens / e2e_seconds, 2) if e2e_seconds > 0 else 0,
+        "cache_hit_rate": round(cache_hit * 100, 1) if cache_hit else 0,
+        "spec_accept_rate": 0,  # SGLang 投机解码指标口径不同，暂不采集
+    }
+
+
 def _metrics_url(target: Target) -> str:
     return f"http://127.0.0.1:{target.service_port}/metrics"
 
@@ -265,13 +295,21 @@ def collect_metrics(executor: Executor, target: Target) -> dict:
         parts = line.split(" ")
         if len(parts) >= 2:
             try:
-                m[parts[0]] = float(parts[1])
+                val = float(parts[1])
             except ValueError:
-                pass
+                continue
+            # Prometheus 指标可能带标签（vLLM / SGLang 均输出 {model_name="..."}）。
+            # 统一按去掉标签后的指标名归并，同名多标签累加（单模型部署下等价于取值），
+            # 否则 m 里存的是「指标名{标签}」，按名取值会永远拿到 0。
+            name = parts[0].split("{", 1)[0]
+            m[name] = m.get(name, 0.0) + val
 
-    # 引擎感知：vLLM 与 llama.cpp 的指标前缀/名称不同
-    if target.engine_type == "vllm":
+    # 引擎感知：vLLM / SGLang 与 llama.cpp 的指标前缀与名称不同
+    engine_type = getattr(target, "engine_type", "llama_cpp") or "llama_cpp"
+    if engine_type == "vllm":
         return _collect_vllm_metrics(m)
+    if engine_type == "sglang":
+        return _collect_sglang_metrics(m)
 
     prompt_tokens = m.get("llamacpp:prompt_tokens_total", 0)
     completion_tokens = m.get("llamacpp:tokens_predicted_total", 0)

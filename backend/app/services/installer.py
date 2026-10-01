@@ -29,6 +29,8 @@ def detect_engine(executor: Executor, target: Target) -> dict:
     engine_type = getattr(target, "engine_type", "llama_cpp") or "llama_cpp"
     if engine_type == "vllm":
         return _detect_vllm(executor, target)
+    if engine_type == "sglang":
+        return _detect_sglang(executor, target)
     if engine_type == "comfyui":
         return _detect_comfyui(executor, target)
     return _detect_llama(executor, target)
@@ -124,6 +126,32 @@ def _detect_vllm(executor: Executor, target: Target) -> dict:
     }
 
 
+def _detect_sglang(executor: Executor, target: Target) -> dict:
+    """检测 SGLang 是否可用（pip/uv 安装后 sglang 命令在 PATH）"""
+    cmd = target.engine_path or "sglang"
+    if target.os == "windows":
+        # SGLang 官方安装说明面向 Linux + NVIDIA GPU
+        return {
+            "installed": False, "engine": "sglang", "path": cmd, "version": "",
+            "reason": "SGLang 官方安装说明面向 Linux + NVIDIA GPU，请在 WSL2 (Linux) 中部署，或改用 llama.cpp",
+            "windows_note": True,
+        }
+    result = executor.run(f"{cmd} --version 2>&1", timeout=25)
+    out = (result.stdout or "").lower()
+    not_found = "not found" in out or "no module" in out or "command not found" in out
+    installed = result.ok and any(c.isdigit() for c in out) and not not_found
+    version = ""
+    if installed:
+        for ln in result.stdout.splitlines():
+            if any(c.isdigit() for c in ln):
+                version = ln.strip()
+                break
+    return {
+        "installed": installed, "engine": "sglang", "path": cmd, "version": version,
+        "reason": "" if installed else "未检测到 sglang 命令，请先安装（pip install sglang，需 CUDA 环境）",
+    }
+
+
 # ==================== 安装任务管理 ====================
 
 def _append_log(job_id: str, line: str):
@@ -210,6 +238,39 @@ def _install_windows(executor: Executor, job_id: str, target: Target) -> str:
             break
     if not exe_path:
         raise RuntimeError("解压后未找到 llama-server.exe")
+    _append_log(job_id, f"  引擎路径: {exe_path}")
+    return exe_path
+
+
+def _install_sglang(executor: Executor, job_id: str, target: Target) -> str:
+    """pip 安装 SGLang（仅 Linux/macOS，Windows 不支持原生运行）
+
+    官方文档要求 Python 3.10+ 与 CUDA 环境，安装方式为 pip/uv
+    （uv pip install --prerelease=allow sglang，pip 等价）。
+    """
+    if target.os == "windows":
+        raise RuntimeError(
+            "SGLang 官方安装说明面向 Linux + NVIDIA GPU，请在 WSL2 (Linux) 中安装，或改用 llama.cpp")
+
+    _run_step(executor, job_id, "command -v pip3 || command -v pip",
+              "检查 pip 是否可用", timeout=20)
+
+    # 检测 CUDA / NVIDIA GPU（SGLang 主要面向 NVIDIA）
+    cuda = executor.run(
+        "command -v nvcc && nvidia-smi --query-gpu=name --format=csv,noheader", timeout=15)
+    if cuda.stdout.strip():
+        _append_log(job_id, f"  检测到 GPU/CUDA: {cuda.stdout.strip().splitlines()[0]}")
+    else:
+        _append_log(job_id, "  未检测到 CUDA，SGLang 需要 NVIDIA GPU 环境，安装后可能无法正常运行")
+
+    _run_step(executor, job_id,
+              "pip3 install -U sglang 2>&1 | tail -20 || pip install -U sglang 2>&1 | tail -20",
+              "pip 安装 SGLang（体积较大、耗时较长，请稍候）", timeout=3600)
+
+    fr = executor.run("command -v sglang")
+    exe_path = fr.stdout.strip().splitlines()[-1] if fr.stdout.strip() else ""
+    if not exe_path:
+        raise RuntimeError("安装完成但未找到 sglang 命令，请检查 pip 输出或 PATH")
     _append_log(job_id, f"  引擎路径: {exe_path}")
     return exe_path
 
@@ -368,6 +429,9 @@ def start_install(target: Target) -> str:
             if engine_type == "vllm":
                 _append_log(job_id, f"开始为「{target.name}」({target.os}) 安装 vLLM")
                 exe = _install_vllm(executor, job_id, target)
+            elif engine_type == "sglang":
+                _append_log(job_id, f"开始为「{target.name}」({target.os}) 安装 SGLang")
+                exe = _install_sglang(executor, job_id, target)
             elif engine_type == "comfyui":
                 _append_log(job_id, f"开始为「{target.name}」({target.os}) 安装 ComfyUI")
                 exe = _install_comfyui(executor, job_id, target)
