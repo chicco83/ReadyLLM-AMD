@@ -5,7 +5,7 @@ import Tune from './Tune'
 import { readLastModel, writeLastModel } from '../lib/lastModel'
 import { useI18n } from '../i18n/I18nContext'
 
-export default function Deploy({ targetId, target }) {
+export default function Deploy({ targetId, target, embedded = false }) {
   const { t } = useI18n()
   const isVideo = target?.engine_type === 'comfyui'
   const [videoMode, setVideoMode] = useState('short') // short | long
@@ -17,15 +17,30 @@ export default function Deploy({ targetId, target }) {
     const canTune = (target?.engine_type || 'llama_cpp') === 'llama_cpp'
     return (
       <div>
+        {/* [2026-10-01 v1.1.12] Passaggi in sequenza ben evidenziati: 1 Deploy  ->  2 Tuning.
+            Versione precedente: due piccoli pulsanti a scheda uguali, senza indicare l'ordine. */}
         {canTune && (
-          <div className="inline-flex gap-1 p-1 rounded-lg bg-card border border-gray/30 mb-6">
-            {[['deploy', `1 · ${t('deploy.stepDeploy')}`], ['tune', `2 · ${t('deploy.stepTune')}`]].map(([k, label]) => (
-              <button key={k} onClick={() => setStep(k)}
-                className={`px-4 py-1.5 rounded-md text-sm transition ${
-                  step === k ? 'bg-blue text-bg font-semibold' : 'text-gray hover:text-fg'}`}>
-                {label}
-              </button>
-            ))}
+          <div className="mb-6">
+            <div className="flex items-stretch gap-3 max-w-3xl">
+              {[['deploy', '1', t('deploy.stepDeploy'), t('deploy.stepDeployHint')],
+                ['tune', '2', t('deploy.stepTune'), t('deploy.stepTuneHint')]].map(([k, n, label, hint], idx) => (
+                <div key={k} className="flex items-center gap-3 flex-1">
+                  {idx === 1 && <span className="text-2xl text-blue/70 -ml-1">➜</span>}
+                  <button onClick={() => setStep(k)}
+                    className={`flex-1 flex items-center gap-3 px-4 py-3 rounded-xl border-2 text-left transition ${
+                      step === k
+                        ? 'bg-blue text-bg border-blue shadow-glow'
+                        : 'border-blue/50 text-blue hover:bg-blue/10'}`}>
+                    <span className={`w-8 h-8 shrink-0 rounded-full flex items-center justify-center font-bold ${
+                      step === k ? 'bg-bg text-blue' : 'bg-blue/20 text-blue'}`}>{n}</span>
+                    <span>
+                      <span className="block font-bold text-base leading-tight">{label}</span>
+                      <span className={`block text-xs ${step === k ? 'text-bg/80' : 'text-blue/70'}`}>{hint}</span>
+                    </span>
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
         {step === 'tune' && canTune
@@ -56,7 +71,7 @@ export default function Deploy({ targetId, target }) {
 
 /* ==================== Deploy dei modelli testuali (llama.cpp / vLLM) ==================== */
 
-function TextDeploy({ targetId }) {
+function TextDeploy({ targetId, embedded = false }) {
   const { t } = useI18n()
   const [models, setModels] = useState([])
   const [selected, setSelected] = useState('')
@@ -65,6 +80,9 @@ function TextDeploy({ targetId }) {
   const [argsText, setArgsText] = useState('')
   const [argsMeta, setArgsMeta] = useState(null) // {source, score, ts, reasoning}
   const [loadingArgs, setLoadingArgs] = useState(false)
+  // [2026-10-01 v1.1.12] Log del motore (la finestra della shell e' nascosta): si aggiorna ogni 3 s quando e' aperto
+  const [showLog, setShowLog] = useState(false)
+  const [logLines, setLogLines] = useState([])
 
   useEffect(() => {
     if (!targetId) return
@@ -170,6 +188,16 @@ function TextDeploy({ targetId }) {
     if (d.success) await pollStatus(false)
   }
 
+  useEffect(() => {
+    if (!showLog || !targetId) return
+    let alive = true
+    const load = () => fetch(`/api/deploy/log?target_id=${targetId}`)
+      .then(r => r.json()).then(d => { if (alive) setLogLines(d.lines || []) }).catch(() => {})
+    load()
+    const id = setInterval(load, 3000)
+    return () => { alive = false; clearInterval(id) }
+  }, [showLog, targetId])
+
   function resetArgs() {
     if (!targetId || !selected) return
     setLoadingArgs(true)
@@ -188,7 +216,7 @@ function TextDeploy({ targetId }) {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-6">{t('deploy.title')}</h1>
+      {!embedded && <h1 className="text-2xl font-bold mb-6">{t('deploy.title')}</h1>}
 
       <div className="bg-card rounded-xl p-6 border border-gray/30 max-w-2xl">
         <div className="flex items-center gap-3 mb-6">
@@ -266,6 +294,18 @@ function TextDeploy({ targetId }) {
         </div>
 
         {msg && <div className="mt-4 text-sm text-gray">{msg}</div>}
+
+        {/* [2026-10-01 v1.1.12] Log del motore: llama-server gira senza finestra visibile, l'output e' nel file di log */}
+        <div className="mt-4">
+          <button onClick={() => setShowLog(s => !s)} className="text-xs text-gray hover:text-fg transition">
+            {showLog ? t('deploy.hideLog') : t('deploy.showLog')}
+          </button>
+          {showLog && (
+            <pre className="mt-2 bg-bg rounded-lg p-3 max-h-64 overflow-auto font-mono text-xs text-fg/80 whitespace-pre-wrap">
+              {logLines.length ? logLines.join('\n') : t('deploy.logEmpty')}
+            </pre>
+          )}
+        </div>
       </div>
     </div>
   )

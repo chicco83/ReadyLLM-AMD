@@ -72,6 +72,18 @@ def _get_running(target_id: str) -> str:
     return _load_running().get(target_id, "")
 
 
+@router.get("/log")
+def engine_log(target_id: str, lines: int = 40):
+    """[2026-10-01 v1.1.12] Ultime righe del log di llama-server (Windows: C:\\temp\\llama_server.log, Linux: /tmp/llama_server.log):
+    permette di vedere cosa fa il motore ora che la finestra della shell e' nascosta."""
+    target, executor, _ = _adapter(target_id)
+    try:
+        from ..services.tuner import _log_server_tail
+        return {"lines": _log_server_tail(executor, target, max(1, min(lines, 200)))}
+    finally:
+        executor.close()
+
+
 @router.get("/models")
 def list_models(target_id: str):
     """Elenca i file .gguf nella cartella dei modelli della macchina target (anche nelle sottocartelle)"""

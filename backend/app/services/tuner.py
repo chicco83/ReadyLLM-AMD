@@ -598,6 +598,9 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
             all_results = []
 
             # Baseline: prima si misurano i parametri originali dell'utente
+            # [2026-10-01 v1.1.12] Il tuning riavvia llama-server a ogni prova: se il Deploy ne ha uno in esecuzione viene fermato
+            if engine.is_running():
+                _append_log(job_id, "llama-server in esecuzione (avviato dal Deploy): verra' fermato e riavviato con i parametri di test")
             # [2026-10-01 v1.1.11] Stato MTP (modello + build) e baseline sanificata.
             # Versione precedente: if baseline_cfg:  (baseline sempre quella fissa del frontend; {} = nessuna baseline)
             mtp = mtp_state(executor, target, model)

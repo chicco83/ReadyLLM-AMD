@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import Monitor from './pages/Monitor'
-import Deploy from './pages/Deploy'
+// [2026-10-01 v1.1.12] Deploy e Tuning sono ora sotto il Monitoraggio (vedi Monitor.jsx)
+// Versione precedente: import Deploy from './pages/Deploy'
 import Settings from './pages/Settings'
 import Store from './pages/Store'
 // [2026-10-01 v1.1.9] Il tuning intelligente e' ora integrato nella pagina di monitoraggio (vedi Monitor.jsx)
 // Versione precedente: import Tune from './pages/Tune'
 import {
-  IconActivity, IconStore, IconRocket, IconSettings,
+  IconActivity, IconStore, IconSettings,
   IconServer,
 } from './components/Icons'
 import Logo from './components/Logo'
@@ -16,7 +17,7 @@ import { I18nProvider, useI18n, LangSwitch } from './i18n/I18nContext'
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'nav.monitor', icon: IconActivity },
   { id: 'store', label: 'nav.store', icon: IconStore },
-  { id: 'deploy', label: 'nav.deploy', icon: IconRocket },
+  // [2026-10-01 v1.1.12] voce 'deploy' rimossa (unita a Monitoraggio): { id: 'deploy', label: 'nav.deploy', icon: IconRocket },
   // [2026-10-01 v1.1.9] voce 'tune' rimossa (unita a Monitoraggio): { id: 'tune', label: 'nav.tune', icon: IconSliders },
   { id: 'settings', label: 'nav.settings', icon: IconSettings },
 ]
@@ -151,13 +152,11 @@ function AppInner() {
             </button>
           </div>
         ) : page === 'dashboard' ? (
-          <Monitor targetId={targetId} />
+          <Monitor targetId={targetId} target={current} />
         ) : page === 'store' ? (
           <Store targetId={targetId} />
-        ) : page === 'deploy' ? (
-          <Deploy targetId={targetId} target={current} />
         ) : (
-          <Monitor targetId={targetId} />
+          <Monitor targetId={targetId} target={current} />
         )}
       </main>
     </div>

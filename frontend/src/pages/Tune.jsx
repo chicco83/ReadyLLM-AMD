@@ -615,7 +615,7 @@ export default function Tune({ targetId, embedded = false }) {
   return (
     <div>
       {embedded
-        ? <h2 className="text-lg font-bold mb-4">{t('tune.title')}</h2>
+        ? null
         : <h1 className="text-2xl font-bold mb-6">{t('tune.title')}</h1>}
 
       {/* Cambio scheda */}

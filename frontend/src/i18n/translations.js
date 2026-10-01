@@ -5,8 +5,8 @@
 export const translations = {
   en: {
     // ===== Navigazione / marchio / globale =====
-    // [2026-10-01 v1.1.11] ripristinata (v1.1.9 la aveva cambiata in 'Monitor & Tuning': il tuning e' ora nella pagina Deploy)
-    'nav.monitor': 'Real-time Monitor',
+    // [2026-10-01 v1.1.12] etichetta: Monitoraggio con Deploy e Tuning sotto (era: 'Real-time Monitor')
+    'nav.monitor': 'Monitor & Deploy',
     'nav.store': 'Model Store',
     'nav.deploy': 'Deploy',
     'nav.tune': 'Smart Tuning',
@@ -287,6 +287,11 @@ export const translations = {
     'settings.testConn': 'Test Connection',
     'settings.testing': 'Testing...',
     'settings.save': 'Save',
+    'deploy.stepDeployHint': 'Start the model',
+    'deploy.stepTuneHint': 'Then optimise its parameters',
+    'deploy.showLog': 'Engine log ▼',
+    'deploy.hideLog': 'Hide engine log ▲',
+    'deploy.logEmpty': '(log empty: the engine has not been started yet or has not written anything)',
     'deploy.stepDeploy': 'Deploy',
     'deploy.stepTune': 'Tuning',
     'tune.baselineLabel': 'Baseline (the config you compare against)',
@@ -344,8 +349,8 @@ export const translations = {
 
   // [v1.1.0 2026-10-01] Italiano: traduzione completa delle chiavi inglesi (senza chiavi duplicate)
   it: {
-    // [2026-10-01 v1.1.11] ripristinata (v1.1.9 la aveva cambiata in 'Monitoraggio e tuning')
-    'nav.monitor': 'Monitoraggio in tempo reale',
+    // [2026-10-01 v1.1.12] etichetta: Monitoraggio con Deploy e Tuning sotto (era: 'Monitoraggio in tempo reale')
+    'nav.monitor': 'Monitoraggio e deploy',
     'nav.store': 'Negozio modelli',
     'nav.deploy': 'Deploy',
     'nav.tune': 'Tuning intelligente',
@@ -579,6 +584,11 @@ export const translations = {
     'settings.testConn': 'Verifica la connessione',
     'settings.testing': 'Verifica in corso...',
     'settings.save': 'Salva',
+    'deploy.stepDeployHint': 'Avvia il modello',
+    'deploy.stepTuneHint': 'Poi ottimizza i suoi parametri',
+    'deploy.showLog': 'Log del motore ▼',
+    'deploy.hideLog': 'Nascondi il log del motore ▲',
+    'deploy.logEmpty': '(log vuoto: il motore non è ancora stato avviato o non ha scritto nulla)',
     'deploy.stepDeploy': 'Deploy',
     'deploy.stepTune': 'Tuning',
     'tune.baselineLabel': 'Baseline (la configurazione di confronto)',
@@ -634,8 +644,8 @@ export const translations = {
   },
   zh: {
     // ===== Navigazione / marchio / globale =====
-    // [2026-10-01 v1.1.11] ripristinata
-    'nav.monitor': '实时监控',
+    // [2026-10-01 v1.1.12] etichetta (era: '实时监控')
+    'nav.monitor': '监控与部署',
     'nav.store': '模型商店',
     'nav.deploy': '部署',
     'nav.tune': '智能调优',
@@ -916,6 +926,11 @@ export const translations = {
     'settings.testConn': '测试连接',
     'settings.testing': '测试中...',
     'settings.save': '保存',
+    'deploy.stepDeployHint': '启动模型',
+    'deploy.stepTuneHint': '然后优化其参数',
+    'deploy.showLog': '引擎日志 ▼',
+    'deploy.hideLog': '隐藏引擎日志 ▲',
+    'deploy.logEmpty': '（日志为空：引擎尚未启动或尚未输出）',
     'deploy.stepDeploy': '部署',
     'deploy.stepTune': '调优',
     'tune.baselineLabel': '基线（对比用的配置）',

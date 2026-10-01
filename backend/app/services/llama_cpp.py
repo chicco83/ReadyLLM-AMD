@@ -71,10 +71,21 @@ class LlamaCppAdapter(EngineAdapter):
         if not result.ok:
             return False, f"Scrittura dello script di avvio non riuscita: {result.stdout} {result.stderr}"
 
-        run_cmd = (
-            'schtasks /create /tn LlamaServer /tr "%s" /sc once /st 00:00 /f '
-            '&& schtasks /run /tn LlamaServer' % bat_path
-        )
+        if self.target.conn_type == "local":
+            # [2026-10-01 v1.1.12] Target locale: finestra NASCOSTA. Prima (e con il log su file) si apriva una shell nera
+            # vuota che sembrava un blocco: l'output di llama-server e' nel file C:\\temp\\llama_server.log, visibile
+            # dal pulsante «Log del motore» nella pagina Deploy. Per i target SSH resta schtasks (il processo deve
+            # sopravvivere alla chiusura della sessione SSH).
+            run_cmd = (f'powershell -NoProfile -Command "Start-Process -FilePath \'{bat_path}\' '
+                       f'-WindowStyle Hidden"')
+        else:
+            run_cmd = (
+                'schtasks /create /tn LlamaServer /tr "%s" /sc once /st 00:00 /f '
+                '&& schtasks /run /tn LlamaServer' % bat_path
+            )
+        # Versione precedente (sempre schtasks, finestra visibile):
+        # run_cmd = ('schtasks /create /tn LlamaServer /tr "%s" /sc once /st 00:00 /f '
+        #            '&& schtasks /run /tn LlamaServer' % bat_path)
         result = self.executor.run(run_cmd, timeout=15)
         if not result.ok:
             return False, f"Avvio non riuscito: {result.stdout} {result.stderr}"
