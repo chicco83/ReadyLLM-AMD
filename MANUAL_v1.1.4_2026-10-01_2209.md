@@ -1,6 +1,6 @@
 # MANUALE — ReadyLLM-AMD
 
-Versione: **1.1.3** — 2026-10-01 22:04
+Versione: **1.1.4** — 2026-10-01 22:09
 
 ## 1. Avvio
 Dalla radice del progetto: `python avvia.py` (backend + frontend), `python avvia.py --installa` (installa prima le dipendenze), `python avvia.py --comandi` (stampa i comandi manuali), `--backend` / `--frontend` per avviarne uno solo. Ctrl+C li ferma entrambi. Comandi manuali:
@@ -53,3 +53,6 @@ Il pulsante in basso nella barra laterale ruota English → Italiano → 中文.
   2. impostare la variabile d'ambiente `READYLLM_GH_PROXY` (es. `https://ghfast.top/`) prima di avviare il backend;
   3. oppure scaricare a mano il pacchetto da https://github.com/ggml-org/llama.cpp/releases (Vulkan: `bin-win-vulkan-x64`,
      ROCm: `bin-win-hip-radeon-x64`), decomprimerlo e indicare il percorso di `llama-server.exe` in Impostazioni.
+
+## 9. Errori npm TAR_ENTRY_ERROR su Google Drive
+Causa: Drive per desktop e' un disco virtuale. Soluzioni: (1) spostare il progetto in `C:\dev` (consigliato); (2) `python avvia.py --installa` crea node_modules locale con giunzione; (3) sospendere Drive durante `npm ci`.
