@@ -109,3 +109,6 @@ La barra di progresso del tuning riporta al centro backend e versione del motore
 
 ## 22. Fine tuning e grafici (v1.1.23)
 A fine tuning la barra resta visibile con l'esito; «Vedi risultati» apre il passaggio Tuning con risultati e consigliato. Nel grafico dei token giornalieri l'output ha l'asse destro. Se la temperatura GPU resta «--», controllare la console del backend (riga «Temperatura GPU non disponibile»).
+
+## 23. Storico delle ottimizzazioni (v1.1.24)
+Voce di menu «Storico ottimizzazioni»: elenca tutti i tuning conclusi (anche falliti), dal piu' recente. Colonne: data, modello, motore (backend + versione), GPU, decodifica, prefill, variazione rispetto alla baseline, contesto, durata; la decodifica migliore e' in verde. Clic su una riga per i dettagli (parametri consigliati da incollare nel Deploy, baseline, TTFT, uso GPU). Si puo' filtrare e cancellare una voce con il cestino. Lo storico parte dai tuning eseguiti dopo questo aggiornamento. Dati in `~/.model-deploy-assistant/tune_log.json`.

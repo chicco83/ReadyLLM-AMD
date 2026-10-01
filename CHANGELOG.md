@@ -1,8 +1,13 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.23** — 2026-10-02 00:50
+Versione corrente: **1.1.24** — 2026-10-02 01:20
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 26. v1.1.24 — 2026-10-02 01:20 — Storico ottimizzazioni + fix temperatura GPU
+- Nuova pagina «Storico ottimizzazioni» (menu laterale): una riga per ogni tuning concluso con data, modello (e dimensione), motore (backend + versione), GPU, decodifica/prefill, guadagno vs baseline, contesto, durata; dettaglio con TTFT, uso GPU, punteggio, prove, parametri consigliati e baseline, percorso motore. Filtri per testo/esito/macchina, eliminazione voce.
+- Backend: `services/tune_log.py` (archivio `~/.model-deploy-assistant/tune_log.json`, max 500 voci), registrato da `_finalize`/`_fail`; `GET /api/tune/history`, `DELETE /api/tune/history/{id}`. Il job salva i metadati di motore/GPU/modello.
+- Temperatura GPU: la query D3DKMT restituiva 0xC000000D perche' il buffer non era azzerato (PhysicalAdapterIndex e' un ingresso); ora e' inizializzato. Il rumore CLIXML di PowerShell non finisce piu' nel log.
 
 ## 25. v1.1.23 — 2026-10-02 00:50 — Esito del tuning, grafico token, temperatura, cache hit
 - A fine tuning la barra di progresso resta (verde/rossa) con esito, configurazione consigliata, «Vedi risultati» e chiusura con X; il passaggio scelto (Deploy/Tuning) e' ricordato e Tuning ripristina l'ultimo risultato (`GET /api/tune/last`) invece di tornare vuoto.
