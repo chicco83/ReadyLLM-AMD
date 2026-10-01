@@ -2,6 +2,7 @@ import { useWebSocket } from '../hooks/useWebSocket'
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, BarChart, Bar, Legend } from 'recharts'
 import { useState, useEffect } from 'react'
 import Deploy from './Deploy'
+import TuneLiveProgress from '../components/TuneLiveProgress'
 import { useI18n } from '../i18n/I18nContext'
 
 const MAX_POINTS = 60
@@ -206,6 +207,9 @@ export default function Monitor({ targetId, target }) {
           </BarChart>
         </ResponsiveContainer>
       </div>
+
+      {/* [2026-10-01 v1.1.19] barra di progresso del tuning, visibile anche guardando i grafici */}
+      <TuneLiveProgress targetId={targetId} />
 
       {/* [2026-10-01 v1.1.12] Deploy e Tuning sotto il monitoraggio, come due passaggi in sequenza (1 -> 2):
           si osserva GPU/velocita' in tempo reale mentre si avvia il modello e si esegue il tuning. */}

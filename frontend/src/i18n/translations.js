@@ -355,6 +355,10 @@ export const translations = {
     'settings.badge.installing': 'Installing...',
     'settings.vllmPlaceholder': 'vllm (on PATH after pip install, can be left empty)',
     'settings.installFail': 'Failed to start',
+    'tune.live': 'Tuning in progress',
+    'tune.liveStep': 'test',
+    'tune.liveShowLog': 'Show log',
+    'tune.liveHideLog': 'Hide log',
     'panel.running': 'Running',
   },
 
@@ -662,6 +666,10 @@ export const translations = {
     'settings.badge.installing': 'Installazione...',
     'settings.vllmPlaceholder': 'vllm (nel PATH dopo pip install, si può lasciare vuoto)',
     'settings.installFail': 'Avvio non riuscito',
+    'tune.live': 'Tuning in corso',
+    'tune.liveStep': 'prova',
+    'tune.liveShowLog': 'Mostra log',
+    'tune.liveHideLog': 'Nascondi log',
     'panel.running': 'In esecuzione',
   },
   zh: {
@@ -1016,6 +1024,10 @@ export const translations = {
     'settings.badge.installing': '安装中...',
     'settings.vllmPlaceholder': 'vllm（pip 安装后默认在 PATH，可留空）',
     'settings.installFail': '启动失败',
+    'tune.live': '调优进行中',
+    'tune.liveStep': '测试',
+    'tune.liveShowLog': '显示日志',
+    'tune.liveHideLog': '隐藏日志',
     'panel.running': '运行中',
   },
 }

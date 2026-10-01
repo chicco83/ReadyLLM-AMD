@@ -120,6 +120,12 @@ def _args_list(cfg: dict, target: Target, ctx_size: int) -> List[str]:
     """Converte il dict di configurazione nell'elenco di parametri da riga di comando di llama-server (con voci fisse e ctx)"""
     args = []
     for k, v in cfg.items():
+        # [2026-10-01 v1.1.19] «off» e' un valore interno del tuner, NON valido per llama-server (--spec-type accetta none,
+        # draft-mtp, ...): con "--spec-type off" il server usciva subito (dopo la baseline ogni prova falliva).
+        # Con spec-type=off il parametro viene semplicemente omesso (= none, il predefinito).
+        # Versione precedente: nessun filtro, si passava sempre --spec-type <valore>
+        if k == "spec-type" and str(v) in ("off", "none", ""):
+            continue
         if k == "n-gpu-layers":
             # llama-server riconosce sia --n-gpu-layers sia --gpu-layers, si usa il nome standard
             args += ["--n-gpu-layers", str(v)]
@@ -416,6 +422,24 @@ def _append_log(job_id: str, msg: str):
             job["logs"].append({"t": time.strftime("%H:%M:%S"), "msg": msg})
 
 
+def _set_progress(job_id: str, phase: str = None, total: int = None, step: bool = False):
+    """[2026-10-01 v1.1.19] Avanzamento per la barra di progresso: fase corrente, prove completate e totale stimato.
+    Il totale e' una stima (la fase fine converge in modo dinamico): se le prove superano la stima, il totale si allarga."""
+    with _LOCK:
+        job = _JOBS.get(job_id)
+        if not job:
+            return
+        pr = job.setdefault("progress", {"done": 0, "total": 1, "phase": ""})
+        if phase is not None:
+            pr["phase"] = phase
+        if total is not None:
+            pr["total"] = max(total, pr["done"])
+        if step:
+            pr["done"] += 1
+            if pr["done"] > pr["total"]:
+                pr["total"] = pr["done"]
+
+
 def get_job(job_id: str) -> Optional[dict]:
     with _LOCK:
         job = _JOBS.get(job_id)
@@ -441,6 +465,7 @@ def list_active_jobs(target_id: str) -> list:
                 "log_count": len(logs),
                 "last_logs": logs[-8:],
                 "result_count": len(job.get("results", [])),
+                "progress": job.get("progress", {"done": 0, "total": 1, "phase": ""}),
             })
         return out
 
@@ -452,6 +477,14 @@ def _run_one(executor: Executor, target: Target, engine: LlamaCppAdapter,
              tag: str) -> Optional[dict]:
     """Avvia un gruppo di configurazione -> misura -> arresto, restituisce il risultato con le metriche; se l'avvio fallisce restituisce None"""
     label = _cfg_label(cfg)
+    _set_progress(job_id, phase=f"{tag}")
+    try:
+        return _run_one_inner(executor, target, engine, model_path, cfg, ctx_size, job_id, tag, label)
+    finally:
+        _set_progress(job_id, step=True)
+
+
+def _run_one_inner(executor, target, engine, model_path, cfg, ctx_size, job_id, tag, label):
     engine.stop()
     time.sleep(2)
     params = StartParams(model_path=model_path, extra_args=_args_list(cfg, target, ctx_size))
@@ -515,6 +548,10 @@ def _coarse_search(executor, target, engine, model_path, ctx_size,
                                              CONTINUOUS_GRID["ubatch-size"][1], 3))
 
     _append_log(job_id, f"[Fase 1 coarse] {len(candidates)} combinazioni di fattori dominanti")
+    # [2026-10-01 v1.1.19] totale stimato = prove gia' fatte (baseline) + coarse + ~8 prove della fase fine
+    with _LOCK:
+        _done = _JOBS.get(job_id, {}).get("progress", {}).get("done", 0)
+    _set_progress(job_id, total=_done + len(candidates) + 8)
     scored = []
     for i, cfg in enumerate(candidates):
         r = _run_one(executor, target, engine, model_path, cfg, ctx_size,
@@ -650,6 +687,7 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
             if cfg_base is not None and not mtp["allowed"] and any(is_spec_key(k) for k in cfg_base):
                 cfg_base = strip_mtp(cfg_base)
                 _append_log(job_id, "  Baseline: parametri di decodifica speculativa (MTP) rimossi perche' non supportati")
+            _set_progress(job_id, phase="baseline", total=(1 if cfg_base is not None else 0) + 10)
             if cfg_base is not None:
                 _append_log(job_id, "[Baseline] test della tua configurazione attuale" if cfg_base
                             else "[Baseline] test con i parametri predefiniti del motore")
