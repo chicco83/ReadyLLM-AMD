@@ -64,6 +64,25 @@ _BENCH_LONG_PROMPT = (
     "distribuire su una singola scheda grafica consumer modelli con miliardi di parametri, ponendo le basi per le applicazioni di IA locali. "
 ) * 6  # ×6 ≈ 2400+ tokens
 _BENCH_MAX_TOKENS = 128
+# [2026-10-02 v1.1.28] Prompt MOLTO lungo (~16k token) per l'obiettivo Coding: gli agenti mandano 10-50k token di file e cronologia a ogni
+# richiesta, e a contesti lunghi il margine tra Vulkan e ROCm puo' cambiare rispetto al prompt da ~2400 token.
+_BENCH_XLONG_PROMPT = _BENCH_LONG_PROMPT * 7
+_XLONG_MIN_CTX = 20000          # sotto questo contesto la misura non entrerebbe nello slot: si salta
+NOISE_MARGIN = 1.03             # una variante vince solo se supera la migliore di almeno il 3% (rumore di misura)
+
+
+def _goal_extras(cfg: dict, goal: str) -> dict:
+    """[2026-10-02 v1.1.28] Impostazioni di servizio per l'obiettivo Coding, aggiunte a TUTTE le prove (baseline compresa) cosi' il
+    confronto e' equo e la configurazione misurata coincide con quella che verra' applicata:
+      --parallel 1      un solo slot con l'intero contesto (con piu' slot --ctx-size si divide tra gli slot)
+      --cache-reuse 256 riuso della KV cache del prefisso tra richieste successive (agenti: stesso prefisso a ogni giro)
+    Se l'utente le ha gia' impostate nella baseline restano i suoi valori."""
+    if goal != "coding":
+        return cfg
+    out = dict(cfg)
+    out.setdefault("parallel", "1")
+    out.setdefault("cache-reuse", "256")
+    return out
 _BENCH_REPEATS = 3  # numero di ripetizioni della misura ufficiale, si prende la mediana
 
 # ==================== Stratificazione dei parametri ====================
@@ -76,7 +95,7 @@ NGL_OPTIONS = ["all", "0"]                    # strati scaricati sulla GPU (all 
 # Parametri continui di rifinitura: discesa per coordinate nella fase fine
 CONTINUOUS_GRID = {
     "batch-size": [1024, 2048, 4096, 8192],
-    "ubatch-size": [128, 256, 512, 1024],
+    "ubatch-size": [64, 128, 256, 512, 1024],   # [2026-10-02 v1.1.28] aggiunto 64 (alcune AMD lo trovano ottimale); prima: [128, 256, 512, 1024]
     "threads": [16, 24, 32],            # thread CPU, influiscono su prefill e cooperazione lato CPU
     "spec-draft-n-max": [2, 3, 4, 5],   # quanti token predice la speculazione in una volta
     "spec-draft-n-min": [1, 2, 3],      # soglia minima di accettazione della speculazione, influisce sull'efficienza speculativa
@@ -135,9 +154,12 @@ def _args_list(cfg: dict, target: Target, ctx_size: int) -> List[str]:
             args += ["--n-gpu-layers", str(v)]
         else:
             args += [f"--{k}", str(v)]
+    # [2026-10-02 v1.1.28] flash-attn e' un fattore provato nella fase fine: se e' nel cfg ha gia' emesso --flash-attn <valore>,
+    # altrimenti resta il predefinito «on». Versione precedente: sempre ["--flash-attn", "on"]
+    fa = [] if "flash-attn" in cfg else ["--flash-attn", "on"]
     args += [
         "--ctx-size", str(ctx_size),
-        "--flash-attn", "on",
+        *fa,
         # Punto chiave: fit va disattivato esplicitamente. fit e' on di default e «di testa sua» abbassa batch/ubatch impostati da noi
         # per far stare tutto nel margine di VRAM che ritiene sicuro, per cui i parametri realmente attivi durante la ricerca != quelli che misuriamo e il risultato e' falsato.
         "--fit", "off",
@@ -338,7 +360,7 @@ def _cpu_mem_snapshot(executor: Executor, target: Target) -> dict:
         return {}
 
 
-def _bench_once(executor: Executor, target: Target, ctx_size: int) -> dict:
+def _bench_once(executor: Executor, target: Target, ctx_size: int, xlong: bool = False) -> dict:
     """Una misura completa: prompt corto per misurare decodifica+TTFT, prompt lungo per misurare il prefill.
     Restituisce {decode, prefill, ttft_ms, gpu_util, gpu_mem_pct}."""
     # Prompt corto: velocita' di decodifica + TTFT
@@ -371,11 +393,22 @@ def _bench_once(executor: Executor, target: Target, ctx_size: int) -> dict:
         tm = long.get("timings", {})
         prefill = float(tm.get("prompt_per_second", 0) or 0)
 
+    # [2026-10-02 v1.1.28] prefill su prompt da ~16k token (solo se richiesto e se il contesto lo permette)
+    prefill_long = 0.0
+    if xlong and ctx_size >= _XLONG_MIN_CTX:
+        xl = _curl_completion(executor, target, {
+            "prompt": f"[{_uuid.uuid4().hex[:16]}] " + _BENCH_XLONG_PROMPT,
+            "n_predict": 8, "temperature": 0, "stream": False,
+        })
+        if xl:
+            prefill_long = float(xl.get("timings", {}).get("prompt_per_second", 0) or 0)
+
     gpu = _gpu_snapshot(executor, target)
     cpu_mem = _cpu_mem_snapshot(executor, target)
     return {
         "decode": round(decode, 2),
         "prefill": round(prefill, 2),
+        "prefill_long": round(prefill_long, 2),
         "ttft_ms": round(ttft_ms, 1),
         "gpu_util": gpu.get("utilization", 0),
         "gpu_mem_pct": gpu.get("memory_pct", 0),
@@ -386,13 +419,14 @@ def _bench_once(executor: Executor, target: Target, ctx_size: int) -> dict:
     }
 
 
-def _bench_median(executor: Executor, target: Target, ctx_size: int) -> dict:
+def _bench_median(executor: Executor, target: Target, ctx_size: int, xlong: bool = False) -> dict:
     """1 warmup + _BENCH_REPEATS prove ufficiali, per ogni metrica si prende la mediana"""
-    _bench_once(executor, target, ctx_size)  # warmup, scartato
-    runs = [_bench_once(executor, target, ctx_size) for _ in range(_BENCH_REPEATS)]
+    _bench_once(executor, target, ctx_size, False)  # warmup, scartato (senza il prompt da 16k: serve solo a scaldare)
+    runs = [_bench_once(executor, target, ctx_size, xlong) for _ in range(_BENCH_REPEATS)]
     return {
         "decode": round(median(r["decode"] for r in runs), 2),
         "prefill": round(median(r["prefill"] for r in runs), 2),
+        "prefill_long": round(median(r["prefill_long"] for r in runs), 2),
         "ttft_ms": round(median(r["ttft_ms"] for r in runs), 1),
         "gpu_util": round(median(r["gpu_util"] for r in runs), 1),
         "gpu_mem_pct": round(median(r["gpu_mem_pct"] for r in runs), 1),
@@ -409,6 +443,9 @@ def _score(metrics: dict, goal: str) -> float:
     w = GOAL_WEIGHTS.get(goal, GOAL_WEIGHTS["latency"])
     decode = metrics.get("decode", 0)
     prefill = metrics.get("prefill", 0)
+    # [2026-10-02 v1.1.28] Coding: conta il prefill sul prompt lungo (~16k token) se misurato
+    if goal == "coding" and metrics.get("prefill_long", 0) > 0:
+        prefill = metrics["prefill_long"]
     ttft = metrics.get("ttft_ms", 0) or 1.0
     # Riferimento di normalizzazione (limite superiore empirico, serve solo a portare grandezze diverse in un intervallo confrontabile)
     score = (w["decode"] * decode +
@@ -513,7 +550,9 @@ def _run_one_inner(executor, target, engine, model_path, cfg, ctx_size, job_id, 
             _append_log(job_id, f"    [llama-server] {ln}")
         engine.stop()
         return None
-    metrics = _bench_median(executor, target, ctx_size)
+    with _LOCK:
+        _goal = _JOBS.get(job_id, {}).get("goal", "")
+    metrics = _bench_median(executor, target, ctx_size, xlong=(_goal == "coding"))   # v1.1.28
     # [2026-10-01 v1.1.18] Calibra la stima della KV cache sul valore reale loggato da llama-server
     try:
         kv = _kv_gb_from_log(executor, target)
@@ -541,9 +580,9 @@ def _coarse_search(executor, target, engine, model_path, ctx_size,
         # [2026-10-01 v1.1.11] senza supporto MTP si prova solo spec-type=off (prima si provava sempre anche draft-mtp)
         for spec in (SPEC_OPTIONS if allow_mtp else [o for o in SPEC_OPTIONS if o == "off"]):
             for cache in CACHE_OPTIONS:
-                cfg = _normalize_cfg(spec, cache, ngl,
+                cfg = _goal_extras(_normalize_cfg(spec, cache, ngl,
                                      CONTINUOUS_GRID["batch-size"][1],
-                                     CONTINUOUS_GRID["ubatch-size"][1], 3)
+                                     CONTINUOUS_GRID["ubatch-size"][2], 3), goal)
                 if _fits_vram(cfg, model_size_gb, ctx_size, gpu_vram_gb, _get_calib(job_id)):
                     out.append(cfg)
                 else:
@@ -557,14 +596,14 @@ def _coarse_search(executor, target, engine, model_path, ctx_size,
         # Versione precedente: _append_log(... "ripiego su CPU (n-gpu-layers=0)"); candidates = _build("0")
         _append_log(job_id, "  La stima della VRAM scarta tutte le combinazioni GPU: provo comunque quelle con cache q4_0 (la prova reale decide)")
         for spec in (SPEC_OPTIONS if allow_mtp else [o for o in SPEC_OPTIONS if o == "off"]):
-            candidates.append(_normalize_cfg(spec, "q4_0", "all", CONTINUOUS_GRID["batch-size"][1],
-                                             CONTINUOUS_GRID["ubatch-size"][1], 3))
+            candidates.append(_goal_extras(_normalize_cfg(spec, "q4_0", "all", CONTINUOUS_GRID["batch-size"][1],
+                                             CONTINUOUS_GRID["ubatch-size"][2], 3), goal))
 
     _append_log(job_id, f"[Fase 1 coarse] {len(candidates)} combinazioni di fattori dominanti")
     # [2026-10-01 v1.1.19] totale stimato = prove gia' fatte (baseline) + coarse + ~8 prove della fase fine
     with _LOCK:
         _done = _JOBS.get(job_id, {}).get("progress", {}).get("done", 0)
-    _set_progress(job_id, total=_done + len(candidates) + 8)
+    _set_progress(job_id, total=_done + len(candidates) + 9)
     scored = []
     for i, cfg in enumerate(candidates):
         # [2026-10-02 v1.1.25] Se la combinazione e' IDENTICA alla baseline si riusa la misura gia' fatta invece di rimisurarla:
@@ -634,6 +673,20 @@ def _fine_search(executor, target, engine, model_path, ctx_size,
                     improved = True
                     _append_log(job_id, f"    ✓ Miglioramento: {param}={options[ni]} punteggio→{r['score']}")
                     break
+    # [2026-10-02 v1.1.28] Sonda flash-attention: su Vulkan/AMD (soprattutto Windows) il kernel FA puo' essere piu' lento che disattivarlo.
+    # La KV cache quantizzata (cache-type-v diverso da f16) richiede FA: in quel caso la sonda non e' applicabile e si salta.
+    cur_fa = best["config"].get("flash-attn", "on")
+    if best["config"].get("cache-type-v", "f16") == "f16":
+        alt_fa = "off" if cur_fa == "on" else "on"
+        trial = dict(best["config"]); trial["flash-attn"] = alt_fa
+        r = _run_one(executor, target, engine, model_path, trial, ctx_size, job_id, f"fine flash-attn={alt_fa}")
+        if r:
+            r["score"] = _score(r["metrics"], goal)
+            if r["score"] > best["score"] * NOISE_MARGIN:
+                best = r
+                _append_log(job_id, f"    ✓ Miglioramento: flash-attn={alt_fa} punteggio→{r['score']}")
+    else:
+        _append_log(job_id, "  Sonda flash-attn saltata: la KV cache quantizzata richiede flash-attention attiva")
     _append_log(job_id, f"  Convergenza fine: {best['label']} (punteggio {best['score']})")
     return best
 
@@ -766,6 +819,10 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
                 cfg_base = strip_mtp(cfg_base)
                 _append_log(job_id, "  Baseline: parametri di decodifica speculativa (MTP) rimossi perche' non supportati")
             _set_progress(job_id, phase="baseline", total=(1 if cfg_base is not None else 0) + 10)
+            if cfg_base is not None and goal == "coding":
+                cfg_base = _goal_extras(cfg_base, goal)
+                _append_log(job_id, "  Obiettivo Coding: a tutte le prove (baseline compresa) si aggiungono --parallel 1 --cache-reuse 256 "
+                                    "(un solo slot con tutto il contesto + riuso della cache del prefisso); prefill misurato anche su ~16k token")
             if cfg_base is not None:
                 _append_log(job_id, "[Baseline] test della tua configurazione attuale" if cfg_base
                             else "[Baseline] test con i parametri predefiniti del motore")
@@ -801,7 +858,7 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
             # Prima: final_best = fine_best if fine_best["score"] > 0 else coarse_best  -> poteva consigliare una configurazione
             # PEGGIORE della baseline (68.23 -> 65.5 t/s, -4%) perche' la fase fine rimisura la stessa riga con rumore.
             # Una variante sostituisce la tua configurazione solo se la supera di almeno il margine di rumore (3%).
-            NOISE = 1.03
+            NOISE = NOISE_MARGIN
             pool = [r for r in all_results if r.get("score", 0) > 0]
             final_best = max(pool, key=lambda r: r["score"]) if pool else coarse_best
             base_r = all_results[0] if all_results and all_results[0] is _JOBS[job_id].get("baseline") else None

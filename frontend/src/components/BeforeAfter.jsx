@@ -49,6 +49,8 @@ export default function BeforeAfter({ baseline, best }) {
       {same && <div className="text-xs text-gray mb-2">{t('tune.noBetter')}</div>}
       <Row label={t('tune.col.decode')} unit="t/s" before={baseline.metrics.decode} after={best.metrics.decode} />
       <Row label={t('tune.col.prefill')} unit="t/s" before={baseline.metrics.prefill} after={best.metrics.prefill} />
+      {/* [2026-10-02 v1.1.28] prefill su ~16k token (misurato solo con l'obiettivo Coding) */}
+      <Row label={t('tune.col.prefillLong')} unit="t/s" before={baseline.metrics.prefill_long} after={best.metrics.prefill_long} />
       <Row label={t('tune.col.ttft')} unit="ms" before={baseline.metrics.ttft_ms} after={best.metrics.ttft_ms} lowerBetter />
     </div>
   )
