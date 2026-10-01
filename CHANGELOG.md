@@ -1,8 +1,12 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.19** — 2026-10-01 23:30
+Versione corrente: **1.1.20** — 2026-10-01 23:50
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 22. v1.1.20 — 2026-10-01 23:50 — Tuning: motore che si fermava + barra di progresso
+- Bug: il tuner passava `--spec-type off` (valore non valido per llama-server) e il motore usciva dopo la baseline; ora con spec-type=off il parametro e' omesso.
+- Barra di progresso live (fase, prove completate/totale stimato, ultime righe del log) nel Monitoraggio, visibile anche con il passaggio Deploy aperto (`GET /api/tune/active` ora include `progress`).
 
 ## 21. v1.1.19 — 2026-10-01 23:30 — Pannello «Motori di inferenza»: tutte le build
 - Il pannello in basso elenca ogni build di llama-server installata (ROCm e Vulkan) con backend, versione (`--version`), dispositivi e marcatore «In uso».

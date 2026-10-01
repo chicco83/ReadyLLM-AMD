@@ -110,3 +110,5 @@ Rimossa da `EngineRow` la sezione «Build installate / Attiva / Installa»; spos
 - Deploy: comandi a sinistra e «Log del motore» a destra (come l'avanzamento del tuning); dopo «Avvia» si passa da solo al passo 2 (Tuning).
 
 - v1.1.19: `find_llama_installs` restituisce anche `version`; `EngineRow` mostra tutte le build da `GET /api/target/<id>/engines-installed`; Settings preseleziona `targets[0]`.
+
+- v1.1.20: `_args_list` omette `spec-type` se off/none; `tuner._set_progress` + campo `progress` nei job; componente `TuneLiveProgress` in Monitor.

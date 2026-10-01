@@ -97,3 +97,6 @@ Nel Deploy il log del motore e' sempre visibile a destra. Dopo «Avvia» (a moto
 
 ## 18. Elenco build installate (v1.1.19)
 Il pannello «Motori di inferenza» in basso elenca tutte le build trovate (es. `C:\llama\rocm` e `C:\llama\vulkan`) con backend, versione e dispositivi; la build in uso e' marcata «In uso». Per cambiarla si usano i pulsanti del backend nel modulo. Alla riapertura delle Impostazioni la macchina salvata e' gia' selezionata.
+
+## 19. Barra di progresso del tuning (v1.1.20)
+Durante il tuning, sotto i grafici del Monitoraggio compare una barra con la fase (baseline, coarse, fine), le prove completate sul totale stimato (il totale cresce se la fase fine ne richiede di piu') e le ultime righe del log, nascondibili con «Nascondi log».
