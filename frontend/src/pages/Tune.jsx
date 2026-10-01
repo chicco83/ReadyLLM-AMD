@@ -179,7 +179,8 @@ function AutoTune({ targetId }) {
           model: selected,
           ctx_size: ctxSize,
           params: best.config,
-          score: best.score || 0,
+          // [2026-10-02 v1.1.26] t/s di decodifica (il Deploy li mostra come «misurati t/s»); prima: score: best.score || 0 (punteggio composito)
+          score: best.metrics?.decode || 0,
         }),
       })
       const d = await res.json()

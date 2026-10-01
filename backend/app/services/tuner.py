@@ -864,6 +864,9 @@ def _finalize(job_id: str, results: List[dict], best: dict):
     try:
         from .tune_history import save_latest
         save_latest(_tid, _model, _ctx, best.get("config", {}),
-                    source="tuner", score=best.get("score", 0))
+                    source="tuner", score=best.get("metrics", {}).get("decode", 0))
+        # [2026-10-02 v1.1.26] Il Deploy mostra questo numero come «misurati X t/s»: si salva la DECODIFICA in t/s, non il punteggio
+        # composito (decodifica + prefill/100 + 1/TTFT) che dava valori come 42.61 «t/s» diversi da quelli reali.
+        # Versione precedente: score=best.get("score", 0)
     except Exception as e:
         _append_log(job_id, f"  ⚠ Salvataggio su disco del risultato di tuning non riuscito: {e}")
