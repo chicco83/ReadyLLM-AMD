@@ -316,7 +316,8 @@ def resolve_llama_backend(executor: Executor, target: Target) -> str:
 # Si confrontano con i nomi reali: se nessuno combacia si elencano gli asset disponibili.
 _WIN_ASSET_PATTERNS = {
     "cuda":   ["bin-win-cuda-12", "bin-win-cuda-cu12", "bin-win-cuda"],
-    "rocm":   ["bin-win-hip-radeon", "bin-win-hip"],
+    # [2026-10-01 v1.1.15] dalle release recenti il pacchetto ROCm si chiama "win-rocm-10.0" (prima "win-hip-radeon")
+    "rocm":   ["bin-win-rocm", "bin-win-hip-radeon", "bin-win-hip"],
     "vulkan": ["bin-win-vulkan"],
     "cpu":    ["bin-win-cpu", "bin-win-avx2"],
 }
@@ -342,36 +343,74 @@ def _gh_proxy() -> str:
     return p if not p or p.endswith("/") else p + "/"
 
 
-def _win_release_urls(executor: Executor, job_id: str) -> list:
-    """Elenca gli URL degli asset dell'ultima release di llama.cpp (API, poi ripiego HTML)."""
+def _parse_tag(testo: str) -> str:
+    m = re.search(r"^TAG=(\S+)", testo or "", re.M)
+    return m.group(1).strip() if m else ""
+
+
+def _win_release_urls(executor: Executor, job_id: str):
+    """Restituisce (urls, tag) dell'ultima release di llama.cpp (API, poi ripiego HTML).
+
+    [2026-10-01 v1.1.15] Ora restituisce anche il TAG della release (es. b11327) e registra nel log quanti asset sono stati
+    trovati e da quale fonte: serve a ricostruire gli URL a mano (vedi _candidate_win_urls) se l'elenco e' vuoto o incompleto,
+    e a capire dal log cosa e' successo. Versione precedente: restituiva solo la lista di URL.
+    """
     _append_log(job_id, "▶ Ricerca dell'ultima release precompilata")
     api = executor.run(
         'powershell -NoProfile -Command "' + _PS_PRE +
         "try { $r=Invoke-RestMethod -Uri 'https://api.github.com/repos/ggml-org/llama.cpp/releases/latest' "
-        "-Headers $h -TimeoutSec 30; $r.assets | ForEach-Object { Write-Output $_.browser_download_url } } "
+        "-Headers $h -TimeoutSec 30; Write-Output ('TAG=' + $r.tag_name); "
+        "$r.assets | ForEach-Object { Write-Output $_.browser_download_url } } "
         "catch { Write-Output ('ERR=' + $_.Exception.Message) }\"", timeout=60)
     urls = [ln.strip() for ln in (api.stdout or "").splitlines() if ln.strip().startswith("http")]
+    tag = _parse_tag(api.stdout)
     if urls:
-        return urls
+        _append_log(job_id, f"  Release {tag or '?'}: {len(urls)} asset (fonte: API GitHub)")
+        return urls, tag
     err = next((ln for ln in (api.stdout or "").splitlines() if ln.startswith("ERR=")), "") or (api.stderr or "")[:200]
-    _append_log(job_id, f"  API GitHub non disponibile ({err.strip()}), provo la pagina HTML delle release")
+    _append_log(job_id, f"  API GitHub senza asset ({(err or 'risposta vuota').strip()}), provo la pagina HTML delle release")
     # Ripiego: tag dalla redirect di /releases/latest, poi pagina expanded_assets (non soggetta al limite dell'API)
     html = executor.run(
         'powershell -NoProfile -Command "' + _PS_PRE +
         "try { $t=(Invoke-WebRequest -Uri 'https://github.com/ggml-org/llama.cpp/releases/latest' -UseBasicParsing "
-        "-Headers $h -TimeoutSec 30).BaseResponse.ResponseUri.AbsoluteUri.Split('/')[-1]; "
+        "-Headers $h -TimeoutSec 30).BaseResponse.ResponseUri.AbsoluteUri.Split('/')[-1]; Write-Output ('TAG=' + $t); "
         "(Invoke-WebRequest -Uri ('https://github.com/ggml-org/llama.cpp/releases/expanded_assets/' + $t) "
         "-UseBasicParsing -Headers $h -TimeoutSec 30).Content } "
         "catch { Write-Output ('ERR=' + $_.Exception.Message) }\"", timeout=90)
     out = html.stdout or ""
-    urls = ["https://github.com" + m for m in re.findall(r'href="(/ggml-org/llama\.cpp/releases/download/[^"]+\.zip)"', out)]
-    if not urls:
-        err = next((ln for ln in out.splitlines() if ln.startswith("ERR=")), "") or (html.stderr or "")[:200]
-        raise RuntimeError(
-            "Impossibile contattare GitHub dalla macchina target (" + err.strip() + "). Controllare rete, proxy/firewall "
-            "e data/ora di sistema; in alternativa impostare READYLLM_GH_PROXY con un mirror di GitHub, oppure scaricare "
-            "manualmente il pacchetto da https://github.com/ggml-org/llama.cpp/releases e indicare il percorso di llama-server.exe nelle Impostazioni")
-    return urls
+    tag = _parse_tag(out) or tag
+    # href relativi o assoluti, .zip e .tar.gz; si tiene tutto e si filtra dopo
+    hrefs = re.findall(r'href="((?:https://github\.com)?/ggml-org/llama\.cpp/releases/download/[^"]+)"', out)
+    urls = [h if h.startswith("http") else "https://github.com" + h for h in hrefs]
+    if urls:
+        _append_log(job_id, f"  Release {tag or '?'}: {len(urls)} asset (fonte: pagina HTML)")
+        return urls, tag
+    if tag:
+        # Nessun elenco ma il tag e' noto: gli URL si ricostruiscono dal nome standard (_candidate_win_urls)
+        _append_log(job_id, f"  Elenco asset non disponibile: uso il tag {tag} e i nomi standard dei pacchetti")
+        return [], tag
+    err = next((ln for ln in out.splitlines() if ln.startswith("ERR=")), "") or (html.stderr or "")[:200]
+    raise RuntimeError(
+        "Impossibile contattare GitHub dalla macchina target (" + err.strip() + "). Controllare rete, proxy/firewall "
+        "e data/ora di sistema; in alternativa impostare READYLLM_GH_PROXY con un mirror di GitHub, oppure scaricare "
+        "manualmente il pacchetto da https://github.com/ggml-org/llama.cpp/releases e indicare il percorso di llama-server.exe nelle Impostazioni")
+
+
+# Varianti Windows x64 per backend, nei nomi standard delle release (verificate su b11327, 2026-10-01)
+_WIN_VARIANTS = {
+    "cpu": ["cpu"],
+    "vulkan": ["vulkan"],
+    "cuda": ["cuda-12.4", "cuda-13.4"],
+    "rocm": ["rocm-10.0", "hip-radeon"],
+}
+
+
+def _candidate_win_urls(tag: str, backend: str) -> list:
+    """URL ricostruiti dal tag: .../releases/download/<tag>/llama-<tag>-bin-win-<variante>-x64.zip"""
+    if not tag:
+        return []
+    base = f"https://github.com/ggml-org/llama.cpp/releases/download/{tag}"
+    return [f"{base}/llama-{tag}-bin-win-{v}-x64.zip" for v in _WIN_VARIANTS.get(backend, [])]
 
 
 def _pick_win_asset(urls: list, backend: str) -> str:
@@ -422,17 +461,29 @@ def _install_windows(executor: Executor, job_id: str, target: Target) -> str:
     #   $a=$r.assets | Where-Object { $_.name -match 'bin-win-cuda-cu12' -and $_.name -match 'x64' } | Select-Object -First 1
     _append_log(job_id, f"▶ Backend llama.cpp selezionato: {backend.upper()} "
                         f"(impostazione: {getattr(target, 'llama_backend', 'auto')})")
-    urls = _win_release_urls(executor, job_id)
+    urls, tag = _win_release_urls(executor, job_id)
     url = _pick_win_asset(urls, backend)
-    if not url:
+    # [2026-10-01 v1.1.15] Se l'elenco non contiene il pacchetto (o e' vuoto) si provano gli URL ricostruiti dal tag.
+    # Versione precedente: errore immediato "Nessun pacchetto Windows ... Asset Windows disponibili: nessuno".
+    candidati = [url] if url else _candidate_win_urls(tag, backend)
+    if not candidati:
         avail = ", ".join(u.rsplit("/", 1)[-1] for u in urls if "win" in u.lower()) or "nessuno"
         raise RuntimeError(
-            f"Nessun pacchetto Windows per il backend {backend} nell'ultima release. "
-            f"Asset Windows disponibili: {avail}")
-    _append_log(job_id, f"  Sorgente download: {url}")
-
+            f"Nessun pacchetto Windows per il backend {backend} nell'ultima release (tag: {tag or 'sconosciuto'}). "
+            f"Asset Windows trovati: {avail}")
     zip_path = install_dir + "\\llama.zip"
-    _win_download(executor, job_id, url, zip_path, "Download del pacchetto precompilato (puo' essere grande, attendere)")
+    ultimo = None
+    for cand in candidati:
+        _append_log(job_id, f"  Sorgente download: {cand}")
+        try:
+            _win_download(executor, job_id, cand, zip_path, "Download del pacchetto precompilato (puo' essere grande, attendere)")
+            ultimo = None
+            break
+        except RuntimeError as e:
+            ultimo = e
+            _append_log(job_id, f"  ✗ {e}")
+    if ultimo is not None:
+        raise ultimo
     _run_step(executor, job_id,
               f'powershell -Command "Expand-Archive -Path \'{zip_path}\' -DestinationPath \'{install_dir}\' -Force"',
               "Decompressione del pacchetto di installazione", check=True)
@@ -441,13 +492,15 @@ def _install_windows(executor: Executor, job_id: str, target: Target) -> str:
     if backend == "cuda":
         cudart = next((u for u in urls if u.rsplit("/", 1)[-1].lower().startswith("cudart")
                        and "x64" in u.lower() and u.lower().endswith(".zip")), "")
+        if not cudart and tag:
+            # Nome standard (senza tag): cudart-llama-bin-win-cuda-12.4-x64.zip
+            cudart = f"https://github.com/ggml-org/llama.cpp/releases/download/{tag}/cudart-llama-bin-win-cuda-12.4-x64.zip"
         if cudart:
             cz = install_dir + "\\cudart.zip"
             _win_download(executor, job_id, cudart, cz, "Download delle DLL runtime CUDA (cudart)")
             _run_step(executor, job_id,
                       f'powershell -Command "Expand-Archive -Path \'{cz}\' -DestinationPath \'{install_dir}\' -Force"',
                       "Decompressione delle DLL CUDA", check=True)
-            # llama-server.exe puo' stare in una sottocartella: copia le DLL accanto all'eseguibile dopo la ricerca (sotto)
 
     # Individua llama-server.exe (dopo la decompressione si trova in una sottocartella)
     find_cmd = (
