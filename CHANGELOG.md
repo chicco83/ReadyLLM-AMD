@@ -1,8 +1,12 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.13** — 2026-10-01 22:40
+Versione corrente: **1.1.14** — 2026-10-01 22:44
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 16. v1.1.14 — 2026-10-01 22:44 — Attiva build, installazione per backend
+- Elenco build installate con pulsante «Attiva» (cambia engine_path automaticamente).
+- Pulsante Installa sempre visibile per llama.cpp, con scelta del backend nella riga (prima non compariva se un motore era gia' configurato).
 
 ## 15. v1.1.13 — 2026-10-01 22:40 — Diagnosi GPU non usata
 - `/api/deploy/log` analizza il log (strati su GPU, dispositivi); il Deploy avvisa quando 0 strati sono offloadati e mostra «GPU in uso: N/M strati».

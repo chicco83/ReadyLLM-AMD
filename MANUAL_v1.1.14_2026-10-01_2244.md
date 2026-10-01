@@ -1,6 +1,6 @@
 # MANUALE — ReadyLLM-AMD
 
-Versione: **1.1.13** — 2026-10-01 22:40
+Versione: **1.1.14** — 2026-10-01 22:44
 
 ## 1. Avvio
 Dalla radice del progetto: `python avvia.py` (backend + frontend), `python avvia.py --installa` (installa prima le dipendenze), `python avvia.py --comandi` (stampa i comandi manuali), `--backend` / `--frontend` per avviarne uno solo. Ctrl+C li ferma entrambi. Comandi manuali:
@@ -82,3 +82,6 @@ Se la VRAM e' errata esegui `python avvia.py --diagnosi-gpu` e invia l'output (m
 
 ## 16. La GPU non viene usata
 Sintomi: nel Monitoraggio GPU 0% e VRAM bassa, CPU alta, pochi token/s. Controlli: (1) Impostazioni → «Motori di inferenza» → **Backend rilevato** deve essere VULKAN (o ROCM) per la Radeon; se e' CPU/CUDA, installa llama.cpp con backend Vulkan (Impostazioni → Backend di llama.cpp: Vulkan → Installa) e punta il percorso del motore a `C:\llama\vulkan\llama-server.exe` con «Sfoglia…». (2) Nel Deploy, «Log del motore»: cerca `offloaded N/M layers to GPU`; N deve essere uguale a M. (3) Il Deploy mostra un avviso giallo se 0 strati sono su GPU.
+
+## 17. Build installate: Attiva / Installa
+Nel pannello «Motori di inferenza», per llama.cpp: elenco delle build trovate (VULKAN, ROCM, CUDA, CPU) con **Attiva** (cambia da solo il percorso del motore); sotto, scegli il backend e premi **Installa** per scaricarne una nuova in `C:\llama\<backend>`. A fine installazione la nuova build diventa quella attiva.

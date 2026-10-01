@@ -1,6 +1,6 @@
 # CONTEXT — ReadyLLM-AMD
 
-Versione: **1.1.13** — 2026-10-01 22:40
+Versione: **1.1.14** — 2026-10-01 22:44
 
 ## Scopo
 Assistente di deploy/tuning/monitoraggio per LLM locali (llama.cpp, vLLM, SGLang) e generazione video
@@ -90,3 +90,7 @@ Il tuning intelligente (automatico + AI) e' una sezione della pagina Monitoraggi
 
 ## Aggiornamento 1.1.13 — GPU non usata
 Segnalazione: nel monitoraggio GPU 0%, VRAM 3 GB/15.8, CPU 71%, 7.7 t/s con un 9B Q8_0 = modello su CPU. Causa probabile: llama-server CPU/CUDA (installato prima di v1.1.0, quando l'installer scaricava sempre CUDA) invece di Vulkan/ROCm. `GET /api/deploy/log` ora restituisce `offload` ("offloaded N/M layers to GPU") e `gpu_devices`; la pagina Deploy mostra un avviso se N=0. Non verificato sul PC reale.
+
+## Aggiornamento 1.1.14 — Attiva build e installazione per backend
+- Causa del «non scarica niente»: con un motore gia' configurato (engine_path) il pannello risultava «Installato» e il pulsante Installa non compariva; inoltre il backend scelto nel form valeva solo dopo «Salva». Ora la riga di ogni macchina llama.cpp ha sempre «Installa una nuova build con backend: [select] [Installa]» (il backend viaggia in `POST /api/target/install-engine` come `backend`).
+- `GET /api/target/<id>/engines-installed` (`installer.find_llama_installs`: `C:\llama\*`, `/tmp/llama.cpp-*`, PATH, motore corrente, con backend rilevato) e `POST /api/target/<id>/activate-engine` (imposta `engine_path`): pulsante **Attiva**.
