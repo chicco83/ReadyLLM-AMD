@@ -32,10 +32,19 @@ function llamaPlaceholder(os) {
   if (os === 'macos') return '/opt/homebrew/bin/llama-server'
   return '/usr/local/bin/llama-server'
 }
-// 引擎路径占位提示：vLLM 用命令名，llama.cpp 用完整路径
+// 引擎路径占位提示：vLLM / SGLang 用命令名，llama.cpp 用完整路径
 function enginePlaceholder(engineType, os, t) {
   if (engineType === 'vllm') return t('settings.vllmPlaceholder')
+  if (engineType === 'sglang') return t('settings.sglangPlaceholder')
   return llamaPlaceholder(os)
+}
+// 引擎元信息文案：优先取当前语言的 engine.<type>.<field>，未命中键则回退后端下发值
+// （t() 缺键时原样返回 key，据此判断是否命中）
+function engineText(engineType, field, t, fallback = '') {
+  if (!engineType) return fallback
+  const key = `engine.${engineType}.${field}`
+  const s = t(key)
+  return s === key ? fallback : s
 }
 function modelsPlaceholder(os) {
   if (os === 'windows') return 'D:\\models'
@@ -214,24 +223,34 @@ export default function Settings({ targets, onSaved, onChanged }) {
             }
             onChange={v => set('engine_type', v)}
           />
-          {curEngine?.desc && (
-            <div className="text-xs text-gray/70 mt-2">{curEngine.desc}</div>
+          {engineText(form.engine_type, 'desc', t, curEngine?.desc) && (
+            <div className="text-xs text-gray/70 mt-2">
+              {engineText(form.engine_type, 'desc', t, curEngine?.desc)}
+            </div>
           )}
         </Field>
 
         {engineOsUnsupported && (
           <div className="mb-4 p-3 rounded-lg bg-yellow/10 text-yellow text-sm border border-yellow/30 flex items-start gap-2">
             <span className="mt-0.5 shrink-0"><IconAlert size={15} /></span>
-            <span>{curEngine?.windows_note || t('settings.engineUnsupported', { os: OS_LABEL[form.os] })}</span>
+            <span>{engineText(form.engine_type, 'windowsNote', t, curEngine?.windows_note) || t('settings.engineUnsupported', { os: OS_LABEL[form.os] })}</span>
           </div>
         )}
 
         <Field
-          label={form.engine_type === 'vllm' ? t('settings.vllmPath') : t('settings.enginePath')}
+          label={
+            form.engine_type === 'vllm'
+              ? t('settings.vllmPath')
+              : form.engine_type === 'sglang'
+                ? t('settings.sglangPath')
+                : t('settings.enginePath')
+          }
           hint={
             form.engine_type === 'vllm'
               ? t('settings.vllmPathHint')
-              : t('settings.enginePathHint')
+              : form.engine_type === 'sglang'
+                ? t('settings.sglangPathHint')
+                : t('settings.enginePathHint')
           }
         >
           <input
@@ -247,7 +266,9 @@ export default function Settings({ targets, onSaved, onChanged }) {
           hint={
             form.engine_type === 'vllm'
               ? t('settings.modelsDirVllm')
-              : t('settings.modelsDirLlama')
+              : form.engine_type === 'sglang'
+                ? t('settings.modelsDirSglang')
+                : t('settings.modelsDirLlama')
           }
         >
           <input
