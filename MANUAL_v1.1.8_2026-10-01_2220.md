@@ -1,6 +1,6 @@
 # MANUALE — ReadyLLM-AMD
 
-Versione: **1.1.7** — 2026-10-01 22:19
+Versione: **1.1.8** — 2026-10-01 22:20
 
 ## 1. Avvio
 Dalla radice del progetto: `python avvia.py` (backend + frontend), `python avvia.py --installa` (installa prima le dipendenze), `python avvia.py --comandi` (stampa i comandi manuali), `--backend` / `--frontend` per avviarne uno solo. Ctrl+C li ferma entrambi. Comandi manuali:
@@ -59,3 +59,6 @@ Causa: Drive per desktop e' un disco virtuale. Soluzioni: (1) spostare il proget
 
 ## 10. Diagnosi GPU/VRAM
 Se la VRAM e' errata esegui `python avvia.py --diagnosi-gpu` e invia l'output (mostra le fonti CLASS / DX / VC con i relativi valori).
+
+## 11. Il tuning non parte / timeout di avvio
+1. Riavvia SEMPRE il backend dopo un `git pull` (Ctrl+C e `python avvia.py`). 2. Nel log del tuning compaiono ora le righe `[llama-server]` con la causa reale (parametro non supportato, VRAM, DLL mancanti). 3. Il log completo e' in `C:\temp\llama_server.log`.

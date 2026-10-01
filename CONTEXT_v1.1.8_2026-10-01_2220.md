@@ -1,6 +1,6 @@
 # CONTEXT — ReadyLLM-AMD
 
-Versione: **1.1.7** — 2026-10-01 22:19
+Versione: **1.1.8** — 2026-10-01 22:20
 
 ## Scopo
 Assistente di deploy/tuning/monitoraggio per LLM locali (llama.cpp, vLLM, SGLang) e generazione video
@@ -65,3 +65,6 @@ VRAM rilevata a 4 GB = ripiego su `Win32_VideoController.AdapterRAM` (uint32). A
 
 ## Aggiornamento 1.1.7
 Verificato sulla RX 9070 XT reale: VRAM 15.8 GiB da `DedicatedVideoMemory` (DirectX). La chiave di classe display non espone qwMemorySize su questo PC. Versione driver DirectX decodificata da uint64 (es. 32.0.31036.15).
+
+## Aggiornamento 1.1.8 — tuning su Windows
+Test di tuning fallito: VRAM 4.0 GB (backend avviato prima del fix, senza riavvio: uvicorn gira senza --reload), dimensione modello 0.0 GB (comando PowerShell fragile) e timeout di avvio senza diagnosi (output di llama-server perso su Windows). Correzioni: dimensione modello robusta, log in `C:\temp\llama_server.log` con ultime righe nel log del tuning, attesa avvio 300 s.

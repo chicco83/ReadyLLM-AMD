@@ -1,8 +1,13 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.7** — 2026-10-01 22:19
+Versione corrente: **1.1.8** — 2026-10-01 22:20
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 10. v1.1.8 — 2026-10-01 22:20 — Tuning su Windows
+- Dimensione modello rilevata correttamente (era 0.0 GB).
+- llama-server su Windows scrive in `C:\temp\llama_server.log`; le ultime righe appaiono nel log del tuning in caso di errore/timeout.
+- Attesa di avvio 120 -> 300 s.
 
 ## 9. v1.1.7 — 2026-10-01 22:19 — Versione driver
 - VRAM RX 9070 XT verificata (15.8 GiB). Decodifica della versione driver DirectX (uint64) in formato a.b.c.d.
