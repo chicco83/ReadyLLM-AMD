@@ -424,7 +424,19 @@ export default function Settings({ targets, onSaved, onChanged }) {
               return (
                 <div className="mt-3 text-sm">
                   {b ? (
-                    <div className="text-green text-xs truncate">{t('settings.inUse')}: {b.path}</div>
+                    <div>
+                      <div className="text-green text-xs truncate">{t('settings.inUse')}: {b.path}</div>
+                      {/* [2026-10-02 v1.1.30] build GPU che NON elenca nessuna scheda (es. ROCm senza DLL HIP): avviso + reinstallazione */}
+                      {v !== 'cpu' && (!b.devices || b.devices.length === 0) && (
+                        <div className="mt-2 flex items-center gap-3 p-3 rounded-lg bg-red/10 border border-red/30">
+                          <span className="text-red flex-1 text-xs">{t('settings.noGpuBuild', { b: v.toUpperCase() })}</span>
+                          <button type="button" onClick={() => installBackend(v)} disabled={inst.running}
+                            className="bg-blue text-bg font-semibold px-4 py-1.5 rounded-lg hover:opacity-90 transition disabled:opacity-40">
+                            {inst.running ? t('settings.badge.installing') : t('settings.reinstall')}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   ) : (
                     <div className="flex items-center gap-3 p-3 rounded-lg bg-yellow/10 border border-yellow/30">
                       <span className="text-yellow flex-1">{t('settings.backendMissing', { b: v })}</span>
@@ -652,6 +664,7 @@ function EngineRow({ target, onChanged }) {
                 {b.version && <div className="text-green">{b.version}</div>}
                 <div className="truncate text-gray/70" title={b.path}>{b.path}</div>
                 {(b.devices || []).map((d, i) => <div key={i} className="text-gray/60">{d}</div>)}
+                {(!b.devices || b.devices.length === 0) && (b.backend || '') !== 'cpu' && <div className="text-red">{t('settings.noGpuShort')}</div>}
               </div>
               {b.active && <span className="px-2 py-1 rounded bg-green/20 text-green font-semibold shrink-0">{t('settings.inUse')}</span>}
             </div>

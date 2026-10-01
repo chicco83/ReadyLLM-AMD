@@ -455,6 +455,70 @@ def _win_download(executor: Executor, job_id: str, url: str, dest: str, desc: st
     raise RuntimeError(f"Download non riuscito da {url}: {last}")
 
 
+# ==================== ROCm su Windows: build lemonade-sdk/llamacpp-rocm (v1.1.30, 2026-10-02) ====================
+# PROBLEMA: dai pacchetti ufficiali ggml-org «win-rocm-*» sono sparite hipblas.dll / rocblas.dll / rocsolver.dll (llama.cpp
+# PR #25775, issue #26996): ggml-hip.dll non si carica, `--list-devices` e' vuoto e il server lavora sulla CPU.
+# SOLUZIONE: per il backend ROCm su Windows si usa prima il progetto lemonade-sdk/llamacpp-rocm, che pubblica build di llama.cpp
+# con TUTTE le librerie runtime ROCm 7 incluse, un pacchetto per famiglia di GPU:
+#   llama-b<N>-windows-rocm-<gfx>-x64.zip   con <gfx> in gfx103X (RX 6000), gfx110X (RX 7000), gfx1150 / gfx1151 (Ryzen AI),
+#   gfx120X (RDNA4: RX 9070 XT / 9070 / 9060). Se non c'e' nulla di adatto si ripiega sul pacchetto ufficiale ggml-org.
+_LEMONADE_REPO = "lemonade-sdk/llamacpp-rocm"
+
+
+def _gfx_family(gpu_name: str) -> str:
+    """Famiglia di GPU AMD (suffisso del pacchetto lemonade) dedotta dal nome commerciale; '' se non riconosciuta."""
+    n = (gpu_name or "").lower()
+    if re.search(r"\b(9[0-9]{3}\s*(xt|gre)?|r9700|9070|9060)\b", n) and "radeon" in n:
+        return "gfx120X"
+    if re.search(r"8060s|8050s|8040s", n):
+        return "gfx1151"
+    if re.search(r"\b(890m|880m|860m|840m)\b", n):
+        return "gfx1150"
+    if re.search(r"\b7[0-9]{3}\b", n):          # RX 7600/7700/7800/7900, W7xxx
+        return "gfx110X"
+    if re.search(r"\b6[0-9]{3}\b", n):          # RX 6600/6700/6800/6900
+        return "gfx103X"
+    return ""
+
+
+def _lemonade_rocm_urls(executor: Executor, job_id: str, target: Target) -> list:
+    """URL dei pacchetti lemonade per la GPU della macchina (dalla release piu' recente che li contiene). Lista vuota se non trovati."""
+    try:
+        from .collectors import _static_gpu_cached
+        gpu = (_static_gpu_cached(executor, target, "windows") or {}).get("name", "")
+    except Exception:
+        gpu = ""
+    gfx = _gfx_family(gpu)
+    if not gfx:
+        _append_log(job_id, f"  Famiglia GPU non riconosciuta da «{gpu or 'nome non rilevato'}»: salto la sorgente lemonade")
+        return []
+    _append_log(job_id, f"▶ ROCm: GPU «{gpu}» -> pacchetto {gfx} di {_LEMONADE_REPO} (librerie ROCm incluse)")
+    api = executor.run(
+        'powershell -NoProfile -Command "' + _PS_PRE +
+        f"try {{ $rs=Invoke-RestMethod -Uri 'https://api.github.com/repos/{_LEMONADE_REPO}/releases?per_page=10' -Headers $h -TimeoutSec 30; "
+        "foreach ($r in $rs) { if (-not $r.draft) { $r.assets | ForEach-Object { Write-Output $_.browser_download_url } } } } "
+        "catch { Write-Output ('ERR=' + $_.Exception.Message) }\"", timeout=60)
+    urls = [ln.strip() for ln in (api.stdout or "").splitlines() if ln.strip().startswith("http")]
+    pat = re.compile(rf"windows-rocm-{gfx}-x64\.zip$", re.I)
+    trovati = [u for u in urls if pat.search(u)]          # gia' dalla release piu' recente verso la piu' vecchia
+    if trovati:
+        _append_log(job_id, f"  Trovato {trovati[0].rsplit('/', 1)[-1]} (fonte: API GitHub)")
+        return trovati[:3]
+    # Ripiego: pagina HTML -> primo tag bNNNN e nome standard del pacchetto
+    html = executor.run(
+        'powershell -NoProfile -Command "' + _PS_PRE +
+        f"try {{ $p=(Invoke-WebRequest -Uri 'https://github.com/{_LEMONADE_REPO}/releases' -UseBasicParsing -Headers $h -TimeoutSec 30).Content; "
+        "[regex]::Matches($p,'/releases/tag/(b\\d+)') | ForEach-Object { Write-Output ('TAG=' + $_.Groups[1].Value) } } "
+        "catch { Write-Output ('ERR=' + $_.Exception.Message) }\"", timeout=60)
+    tags = []
+    for ln in (html.stdout or "").splitlines():
+        if ln.startswith("TAG=") and ln[4:].strip() not in tags:
+            tags.append(ln[4:].strip())
+    if tags:
+        _append_log(job_id, f"  Elenco asset non disponibile: provo i nomi standard dai tag {', '.join(tags[:3])}")
+    return [f"https://github.com/{_LEMONADE_REPO}/releases/download/{t}/llama-{t}-windows-rocm-{gfx}-x64.zip" for t in tags[:3]]
+
+
 # ==================== Script di installazione per piattaforma ====================
 
 def _install_windows(executor: Executor, job_id: str, target: Target) -> str:
@@ -473,29 +537,46 @@ def _install_windows(executor: Executor, job_id: str, target: Target) -> str:
     #   $a=$r.assets | Where-Object { $_.name -match 'bin-win-cuda-cu12' -and $_.name -match 'x64' } | Select-Object -First 1
     _append_log(job_id, f"▶ Backend llama.cpp selezionato: {backend.upper()} "
                         f"(impostazione: {getattr(target, 'llama_backend', 'auto')})")
-    urls, tag = _win_release_urls(executor, job_id)
-    url = _pick_win_asset(urls, backend)
-    # [2026-10-01 v1.1.15] Se l'elenco non contiene il pacchetto (o e' vuoto) si provano gli URL ricostruiti dal tag.
-    # Versione precedente: errore immediato "Nessun pacchetto Windows ... Asset Windows disponibili: nessuno".
-    candidati = [url] if url else _candidate_win_urls(tag, backend)
-    if not candidati:
-        avail = ", ".join(u.rsplit("/", 1)[-1] for u in urls if "win" in u.lower()) or "nessuno"
-        raise RuntimeError(
-            f"Nessun pacchetto Windows per il backend {backend} nell'ultima release (tag: {tag or 'sconosciuto'}). "
-            f"Asset Windows trovati: {avail}")
     zip_path = install_dir + "\\llama.zip"
-    ultimo = None
-    for cand in candidati:
-        _append_log(job_id, f"  Sorgente download: {cand}")
-        try:
-            _win_download(executor, job_id, cand, zip_path, "Download del pacchetto precompilato (puo' essere grande, attendere)")
-            ultimo = None
-            break
-        except RuntimeError as e:
-            ultimo = e
-            _append_log(job_id, f"  ✗ {e}")
-    if ultimo is not None:
-        raise ultimo
+
+    def _scarica(candidati: list) -> bool:
+        """Prova i candidati in ordine; True al primo download riuscito"""
+        for cand in candidati:
+            _append_log(job_id, f"  Sorgente download: {cand}")
+            try:
+                _win_download(executor, job_id, cand, zip_path, "Download del pacchetto precompilato (puo' essere grande, attendere)")
+                return True
+            except RuntimeError as e:
+                _append_log(job_id, f"  ✗ {e}")
+        return False
+
+    urls, tag = [], ""
+    scaricato = False
+    # [2026-10-02 v1.1.30] ROCm: prima il pacchetto lemonade (con le librerie ROCm incluse), poi quello ufficiale ggml-org.
+    # Versione precedente: sempre e solo il pacchetto ggml-org (senza hipblas.dll/rocblas.dll -> GPU non rilevata).
+    if backend == "rocm":
+        scaricato = _scarica(_lemonade_rocm_urls(executor, job_id, target))
+        if not scaricato:
+            _append_log(job_id, "  ⚠ Pacchetto lemonade non disponibile: ripiego sul pacchetto ufficiale ggml-org "
+                                "(potrebbe non rilevare la GPU se mancano hipblas.dll/rocblas.dll)")
+    if not scaricato:
+        urls, tag = _win_release_urls(executor, job_id)
+        url = _pick_win_asset(urls, backend)
+        # [2026-10-01 v1.1.15] Se l'elenco non contiene il pacchetto (o e' vuoto) si provano gli URL ricostruiti dal tag.
+        # Versione precedente: errore immediato "Nessun pacchetto Windows ... Asset Windows disponibili: nessuno".
+        candidati = [url] if url else _candidate_win_urls(tag, backend)
+        if not candidati:
+            avail = ", ".join(u.rsplit("/", 1)[-1] for u in urls if "win" in u.lower()) or "nessuno"
+            raise RuntimeError(
+                f"Nessun pacchetto Windows per il backend {backend} nell'ultima release (tag: {tag or 'sconosciuto'}). "
+                f"Asset Windows trovati: {avail}")
+        if not _scarica(candidati):
+            raise RuntimeError("Download non riuscito da nessuna sorgente (vedi i log sopra)")
+    if backend == "rocm":
+        # [2026-10-02 v1.1.30] reinstallazione pulita: i file della vecchia build (senza DLL HIP) non devono restare mescolati
+        # a quelli nuovi. Si cancella tutto tranne lo zip appena scaricato.
+        executor.run(f'powershell -NoProfile -Command "Get-ChildItem -Path \'{install_dir}\' -Exclude llama.zip | '
+                     'Remove-Item -Recurse -Force -ErrorAction SilentlyContinue"', timeout=60)
     _run_step(executor, job_id,
               f'powershell -Command "Expand-Archive -Path \'{zip_path}\' -DestinationPath \'{install_dir}\' -Force"',
               "Decompressione del pacchetto di installazione", check=True)
@@ -533,6 +614,18 @@ def _install_windows(executor: Executor, job_id: str, target: Target) -> str:
             executor.run(f'powershell -NoProfile -Command "Copy-Item -Path \'{install_dir}\\*.dll\' '
                          f'-Destination \'{exe_dir}\' -Force"', timeout=60)
     _append_log(job_id, f"  Percorso del motore: {exe_path}")
+    # [2026-10-02 v1.1.30] Verifica finale: la build deve elencare almeno una GPU (--list-devices). Per ROCm e' il difetto noto
+    # (DLL HIP mancanti) e va detto subito, invece di scoprirlo nel tuning con la CPU al 100%.
+    if backend in ("rocm", "vulkan", "cuda"):
+        try:
+            info = detect_llama_backends(executor, target, exe_path)
+            if info.get("devices"):
+                _append_log(job_id, f"  ✓ GPU rilevata dalla build {backend.upper()}: {info['devices'][0]}")
+            else:
+                _append_log(job_id, f"  ⚠ La build {backend.upper()} NON elenca nessuna GPU (--list-devices vuoto): resterebbe sulla CPU. "
+                                    + ("Mancano probabilmente le librerie ROCm/HIP o il driver AMD e' troppo vecchio." if backend == "rocm" else ""))
+        except Exception as e:
+            _append_log(job_id, f"  (verifica GPU non riuscita: {e})")
     return exe_path
 
 
