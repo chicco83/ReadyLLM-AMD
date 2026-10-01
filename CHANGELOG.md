@@ -1,8 +1,11 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.2** — 2026-10-01 22:00
+Versione corrente: **1.1.3** — 2026-10-01 22:04
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 5. v1.1.3 — 2026-10-01 22:04 — Script di avvio
+- Aggiunto `avvia.py` nella radice (avvio di backend e frontend, opzioni `--installa`, `--comandi`, `--backend`, `--frontend`).
 
 ## 4. v1.1.2 — 2026-10-01 22:00 — Flusso git su main
 - Il lavoro v1.1.0/v1.1.1 è stato portato su `main` (fast-forward); `main` è il ramo e repository predefinito delle sessioni.

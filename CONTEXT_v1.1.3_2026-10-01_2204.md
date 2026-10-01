@@ -1,6 +1,6 @@
 # CONTEXT — ReadyLLM-AMD
 
-Versione: **1.1.2** — 2026-10-01 22:00
+Versione: **1.1.3** — 2026-10-01 22:04
 
 ## Scopo
 Assistente di deploy/tuning/monitoraggio per LLM locali (llama.cpp, vLLM, SGLang) e generazione video
@@ -50,3 +50,6 @@ Proposta all'autore originale: vedere `UPSTREAM_PROPOSAL.md`.
 
 ## Aggiornamento 1.1.2 — flusso git
 Il ramo di lavoro e repository predefinito è `main` (origin: https://github.com/chicco83/ReadyLLM-AMD): le sessioni fanno commit e push direttamente su `main`.
+
+## Aggiornamento 1.1.3
+Aggiunto `avvia.py` nella radice: avvia backend (uvicorn, porta 8000) e frontend (Vite, porta 3000) con un solo comando.
