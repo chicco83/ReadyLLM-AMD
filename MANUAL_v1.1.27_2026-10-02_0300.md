@@ -118,3 +118,12 @@ La configurazione consigliata e' la migliore per punteggio tra baseline e prove;
 
 ## 25. Valore «misurati» nel Deploy (v1.1.26)
 Il numero accanto a «Precompilato dal tuning automatico» e' la velocita' di decodifica in t/s della configurazione consigliata (prima era il punteggio composito). Per aggiornare un valore vecchio basta rieseguire il tuning del modello.
+
+## 26. Obiettivi di ottimizzazione (v1.1.27)
+- **Coding e agenti** (consigliato per Claude Code, Cline, Continue…): contesti lunghi riletti a ogni richiesta + codice generato (prefill 50%, decodifica 40%, TTFT 10%).
+- **Percezione end-to-end**: chat e assistenti (equilibrio tra attesa iniziale e velocita' di risposta).
+- **Throughput di decodifica**: generazioni lunghe (scrittura, riassunti, batch).
+- **Prefill di testi lunghi**: documenti/RAG molto lunghi con poco output.
+
+## 27. Tuning multi-motore e applicazione (v1.1.27)
+Con piu' build GPU installate (Impostazioni → Motori di inferenza) compare «Prova anche gli altri motori installati»: la configurazione migliore viene rimisurata con ogni altra build (es. ROCm contro Vulkan) e il motore cambia solo se vince di almeno il 3%. «Salva e applica» salva, cambia motore se serve e riavvia il modello con la configurazione consigliata. Il grafico «Prima/Dopo» confronta decodifica, prefill e TTFT con la variazione percentuale.

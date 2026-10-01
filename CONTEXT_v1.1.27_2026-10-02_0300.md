@@ -124,3 +124,5 @@ Rimossa da `EngineRow` la sezione «Build installate / Attiva / Installa»; spos
 - v1.1.25: tuner worker sceglie `max(score)` su all_results con soglia 3% sulla baseline; `_coarse_search(baseline_result=...)` riusa la misura se la config e' identica; `_finalize` marca `recommended` per identita'.
 
 - v1.1.26: `tune_history.score` ora = decodifica t/s (tuner._finalize e Tune.saveBest); il punteggio composito resta solo in tune_log/risultati.
+
+- v1.1.27: `tuner._alt_engines/_try_other_engines` (dataclasses.replace(target, engine_path=...)); `try_engines` in TuneRequest; `POST /api/tune/apply`; `GOAL_WEIGHTS['coding']`; componente `BeforeAfter`; i risultati portano il campo `engine`.

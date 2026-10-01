@@ -1,8 +1,15 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.26** — 2026-10-02 02:10
+Versione corrente: **1.1.27** — 2026-10-02 03:00
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 29. v1.1.27 — 2026-10-02 03:00 — Tuning multi-motore, applica+riavvia, prima/dopo, obiettivo Coding
+- **Altri motori:** opzione «Prova anche gli altri motori installati» (visibile con 2+ build GPU, es. Vulkan e ROCm): a fine tuning la configurazione migliore e' rimisurata con le altre build; il motore cambia solo se e' almeno il 3% piu' veloce. Le build non utilizzabili con la configurazione sono saltate.
+- **Salva e applica** (`POST /api/tune/apply`): salva i parametri, se consigliato cambia motore (engine_path/backend) e RIAVVIA il modello con gli stessi parametri misurati (flash-attn, fit off compresi).
+- Avviso nel Tuning: il tuning prende il controllo di llama-server e lo lascia fermo a fine prove.
+- **Grafico prima vs dopo** (decodifica, prefill, TTFT, % e motore) nella barra di progresso finale e nel riquadro della configurazione consigliata.
+- Nuovo obiettivo **Coding e agenti** (prefill 50%, decodifica 40%, TTFT 10%), predefinito; descrizioni di tutti gli obiettivi con il caso d'uso. Lo storico mostra il motore della configurazione consigliata.
 
 ## 28. v1.1.26 — 2026-10-02 02:10 — Deploy: «misurati t/s» corretto
 - Il Deploy mostrava come «misurati X t/s» il punteggio composito del tuning (es. 42.61) invece della decodifica reale. Ora il tuning (salvataggio automatico e «Salva e applica») registra i t/s di decodifica. I valori gia' salvati restano errati finche' non si rifa un tuning per quel modello.
