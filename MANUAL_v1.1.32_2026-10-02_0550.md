@@ -143,3 +143,6 @@ Impostazioni → Backend: ROCm. Se la build installata non vede la GPU compare l
 
 ## 31. Download e valore «misurati» (v1.1.31)
 Durante l'installazione di un motore Impostazioni mostra una barra con la percentuale scaricata e i MB. Nel Deploy il numero «misurati» e' la decodifica in t/s dell'ultimo tuning; se un salvataggio e' precedente alla correzione e lo storico non lo contiene, il numero non appare finche' non si rifa un tuning (i parametri restano validi).
+
+## 32. Seguire il tuning (v1.1.32)
+La barra sotto i grafici mostra la prova in corso, il log del motore in diretta e un avviso se il motore e' muto da piu' di 45 s. Se la VRAM supera il 92% il log del tuning lo segnala: su Windows la velocita' crolla perche' le allocazioni finiscono nella RAM condivisa; usare cache KV q4_0, un contesto minore o un modello piu' leggero.

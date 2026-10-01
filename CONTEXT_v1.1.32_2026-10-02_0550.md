@@ -134,3 +134,5 @@ Rimossa da `EngineRow` la sezione «Build installate / Attiva / Installa»; spos
 - v1.1.30: `installer._gfx_family/_lemonade_rocm_urls`, `_install_windows` con sorgente lemonade per rocm + pulizia cartella + verifica `--list-devices`; Settings: avviso/Reinstalla per build senza GPU.
 
 - v1.1.31: `installer._win_download` con thread + polling dimensione file, `_set_dl_progress`; `tune_history.score_kind` e `_legacy_decode` (via `tune_log.last_decode`).
+
+- v1.1.32: `services/running_args.py`; `_set_progress(current=...)`; `TuneLiveProgress` con log motore (`GET /api/deploy/log`) e `quietSec`; avviso `gpu_mem_pct >= 92` in `_run_one_inner`.

@@ -1,8 +1,13 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.31** — 2026-10-02 05:20
+Versione corrente: **1.1.32** — 2026-10-02 05:50
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 34. v1.1.32 — 2026-10-02 05:50 — Trasparenza durante il tuning
+- La scheda «Decodifica speculativa» mostra il tipo in uso anche durante il tuning: il tuner scrive i parametri di ogni prova in `running_args.json` (nuovo modulo `services/running_args.py`, condiviso con il Deploy).
+- La barra di progresso mostra la **configurazione in prova** e il **log del motore in diretta**, con avviso giallo se non arriva output da 45 s (avvio lento, compilazione kernel ROCm al primo uso, VRAM quasi piena).
+- Avviso nel log del tuning se la VRAM supera il 92% durante una prova (spill in RAM condivisa su Windows: velocita' molto ridotta).
 
 ## 33. v1.1.31 — 2026-10-02 05:20 — Percentuale di download e valore «misurati» corretto
 - **Download da GitHub:** barra di avanzamento con percentuale e MB (Impostazioni) e riga di log aggiornata sul posto. La dimensione totale si legge con una richiesta HEAD, il file parziale si controlla ogni 2 s (`job["progress"]` in `GET /api/target/install-status`).
