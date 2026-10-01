@@ -137,3 +137,6 @@ Con piu' build GPU installate (Impostazioni → Motori di inferenza) compare «P
 - **Effetto del tuning:** sotto i grafici, prima/dopo dell'ultimo tuning concluso e tabella degli ultimi sei.
 - **Decodifica speculativa:** scheda sopra i grafici; mostra se il modello usa MTP/ngram (letto dai parametri dell'ultimo avvio dal Deploy: se il modello e' stato avviato altrove risulta «sconosciuta»). MTP sta nella memoria del modello (VRAM con n-gpu-layers all); ngram usa la cronologia dei token (CPU/RAM). Nessuno dei due usa il disco/SSD.
 - **ROCm su CPU:** se il confronto tra motori dice «saltato: --list-devices non elenca nessuna GPU», la build ROCm non vede la scheda (driver AMD con HIP non installato o GPU non supportata dalla build). Verifica a mano con `C:\llama\rocm\llama-server.exe --list-devices`.
+
+## 30. ROCm su Windows (v1.1.30)
+Impostazioni → Backend: ROCm. Se la build installata non vede la GPU compare l'avviso rosso con **Reinstalla**: scarica da `lemonade-sdk/llamacpp-rocm` il pacchetto `llama-b<N>-windows-rocm-<gfx>-x64.zip` adatto alla tua scheda (RX 9070 XT = gfx120X), che include le librerie ROCm, sostituisce il contenuto di `C:\llama\rocm` e lo mette in uso. A fine installazione il log dice se la GPU e' stata rilevata. Poi il tuning puo' confrontare ROCm e Vulkan.

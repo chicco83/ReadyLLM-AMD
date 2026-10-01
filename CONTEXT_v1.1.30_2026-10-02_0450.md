@@ -130,3 +130,5 @@ Rimossa da `EngineRow` la sezione «Build installate / Attiva / Installa»; spos
 - v1.1.28: `_goal_extras` (parallel/cache-reuse per coding), `_BENCH_XLONG_PROMPT` + metrica `prefill_long`, `_score` usa prefill_long per coding, sonda flash-attn in `_fine_search`, `NOISE_MARGIN` costante, ubatch grid con 64 (indice 256 = [2]).
 
 - v1.1.29: `TuningImpact` (Monitor), `SpecCard` + `deploy._record_args/GET /api/deploy/spec`, `tuner._offload_from_log` e controllo `devices` in `_try_other_engines`.
+
+- v1.1.30: `installer._gfx_family/_lemonade_rocm_urls`, `_install_windows` con sorgente lemonade per rocm + pulizia cartella + verifica `--list-devices`; Settings: avviso/Reinstalla per build senza GPU.

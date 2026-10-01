@@ -1,8 +1,14 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.29** — 2026-10-02 04:20
+Versione corrente: **1.1.30** — 2026-10-02 04:50
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 32. v1.1.30 — 2026-10-02 04:50 — ROCm su Windows: pacchetto con librerie incluse
+- Causa di «ROCm non rileva la scheda»: i pacchetti ufficiali ggml-org `win-rocm-*` non includono piu' hipblas.dll/rocblas.dll (llama.cpp PR #25775, issue #26996).
+- Il backend ROCm su Windows scarica ora `llama-b<N>-windows-rocm-<gfx>-x64.zip` da **lemonade-sdk/llamacpp-rocm** (ROCm 7 con tutte le DLL), con la famiglia scelta dal nome della GPU (gfx120X = RX 9070/9060, gfx110X = RX 7000, gfx103X = RX 6000, gfx1150/1151 = Ryzen AI); ripiego sul pacchetto ufficiale. Reinstallazione pulita della cartella `C:\llama\rocm`.
+- Verifica a fine installazione (`--list-devices`): se la build non elenca GPU lo scrive nel log.
+- Impostazioni: se la build in uso (ROCm/Vulkan/CUDA) non elenca nessuna GPU compare un avviso rosso con **Reinstalla**; l'elenco delle build segna «nessuna GPU rilevata».
 
 ## 31. v1.1.29 — 2026-10-02 04:20 — Prima/dopo nel Monitoraggio, decodifica speculativa, motori su CPU
 - Il grafico «Utilizzo dei token (per giorno)» e' sostituito dal pannello **Effetto del tuning**: grafico prima/dopo dell'ultimo tuning (decodifica, prefill, TTFT, motore) + tabella degli ultimi tuning (da `GET /api/tune/history`).
