@@ -1,12 +1,15 @@
 # CLAUDE.md — ReadyLLM-AMD
 
-Versione documento: 1.1.1 — 2026-10-01 21:55
+Versione documento: 1.1.2 — 2026-10-01 22:00
 
 ## Regole obbligatorie per ogni sessione (locale o cloud)
 
+0. **Repository/ramo predefinito**: `chicco83/ReadyLLM-AMD`, ramo `main`. Fare commit e push direttamente su `main`
+   (`git pull --rebase origin main` prima, poi `git push origin main`); non creare altri rami né PR salvo richiesta esplicita.
+
 1. **Versioning**: ogni revisione di codice o documentazione incrementa il numero di versione
    (semver: x.y.z). La versione, con data e ora, va scritta **in cima al contenuto** del file e
-   **nel nome** dei documenti versionati (es. `MANUAL_v1.1.1_2026-10-01_2155.md`).
+   **nel nome** dei documenti versionati (es. `MANUAL_v1.1.2_2026-10-01_2200.md`).
 2. **Tre documenti sempre aggiornati** a ogni attività:
    - `CONTEXT_v<versione>_<data>_<ora>.md` — contesto del progetto, architettura, decisioni.
    - `CHANGELOG.md` — voci numerate in ordine, una per revisione (data/ora, versione, modifiche).
@@ -21,7 +24,7 @@ Versione documento: 1.1.1 — 2026-10-01 21:55
    1. `git pull --rebase`
    2. `git add` **per nome** solo dei file `.md` modificati da questa sessione (mai `git add -A` / `git add .`)
    3. commit con messaggio descrittivo (mai ".") e `git push` subito
-   4. file di codice/modello modificati si committano a parte, solo se l'utente conferma
+   4. file di codice si committano a parte (commit separato dai `.md`)
    5. conflitto su un `.md`: unire a mano tenendo entrambe le modifiche (CHANGELOG: entrambe le voci, numerate in ordine)
    6. allineare la copia locale con il commit fatto
 

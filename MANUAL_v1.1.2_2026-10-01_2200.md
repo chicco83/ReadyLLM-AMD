@@ -1,6 +1,6 @@
 # MANUALE — ReadyLLM-AMD
 
-Versione: **1.1.1** — 2026-10-01 21:55
+Versione: **1.1.2** — 2026-10-01 22:00
 
 ## 1. Avvio
 ```bash

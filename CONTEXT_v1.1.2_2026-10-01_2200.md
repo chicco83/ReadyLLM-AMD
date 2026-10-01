@@ -1,6 +1,6 @@
 # CONTEXT — ReadyLLM-AMD
 
-Versione: **1.1.1** — 2026-10-01 21:55
+Versione: **1.1.2** — 2026-10-01 22:00
 
 ## Scopo
 Assistente di deploy/tuning/monitoraggio per LLM locali (llama.cpp, vLLM, SGLang) e generazione video
@@ -47,3 +47,6 @@ API `api.github.com` bloccata o con limite 60 richieste/ora (403), errore reale 
 TLS 1.2 + User-Agent, ripiego sulla pagina HTML `releases/expanded_assets/<tag>`, 3 tentativi con verifica dimensione,
 mirror opzionale `READYLLM_GH_PROXY`, `_run_step(check=True)` che propaga l'errore reale, DLL `cudart` per CUDA.
 Proposta all'autore originale: vedere `UPSTREAM_PROPOSAL.md`.
+
+## Aggiornamento 1.1.2 — flusso git
+Il ramo di lavoro e repository predefinito è `main` (origin: https://github.com/chicco83/ReadyLLM-AMD): le sessioni fanno commit e push direttamente su `main`.

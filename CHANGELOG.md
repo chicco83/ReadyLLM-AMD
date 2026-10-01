@@ -1,8 +1,11 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.1** — 2026-10-01 21:55
+Versione corrente: **1.1.2** — 2026-10-01 22:00
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 4. v1.1.2 — 2026-10-01 22:00 — Flusso git su main
+- Il lavoro v1.1.0/v1.1.1 è stato portato su `main` (fast-forward); `main` è il ramo e repository predefinito delle sessioni.
 
 ## 3. v1.1.1 — 2026-10-01 21:55 — Installazione llama.cpp più robusta
 - Installazione Windows: TLS 1.2 forzato, User-Agent, ripiego HTML se l'API GitHub fallisce (403/limite/blocco),
