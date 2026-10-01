@@ -216,7 +216,7 @@ def _collect_gpu_amd_linux(executor: Executor) -> dict:
 # Lo script C# e' passato con -EncodedCommand (base64 UTF-16LE) per evitare problemi di virgolette. Il risultato e' in cache
 # 5 s (Add-Type costa ~1 s); se non disponibile (driver senza supporto) restituisce 0 e non si riprova per 10 minuti.
 _PS_TEMP_SCRIPT = r"""
-$ErrorActionPreference='Stop'
+$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'
 try {
 Add-Type -TypeDefinition @'
 using System; using System.Runtime.InteropServices;
@@ -232,6 +232,9 @@ public static class GpuT {
   O o = new O(); o.Lo = lo; o.Hi = hi;
   int r = D3DKMTOpenAdapterFromLuid(ref o); if (r != 0) return "open=" + r;
   IntPtr b = Marshal.AllocHGlobal(256); string res;
+  // [2026-10-02 v1.1.24] buffer AZZERATO: PhysicalAdapterIndex e' un campo di INGRESSO; con memoria non inizializzata la query
+  // rispondeva STATUS_INVALID_PARAMETER (0xC000000D = -1073741811). Versione precedente: nessuna inizializzazione.
+  Marshal.StructureToPtr(new P(), b, false);
   try { Q q = new Q(); q.H = o.H; q.T = 62; q.D = b; q.S = (uint)Marshal.SizeOf(typeof(P));
    r = D3DKMTQueryAdapterInfo(ref q); if (r != 0) res = "query=" + r;
    else { P p = (P)Marshal.PtrToStructure(b, typeof(P)); res = "T=" + p.Tmp; } }
@@ -267,7 +270,7 @@ def _gpu_temp_windows(executor: Executor, target: Target) -> float:
         # [2026-10-02 v1.1.23] il motivo del fallimento finisce nella console del backend (prima era silenzioso)
         import logging
         logging.getLogger("uvicorn.error").warning("Temperatura GPU non disponibile: %s | %s",
-                                                    kv.get("GPUTEMPERR", "nessun output"), (r.stderr or "")[:300])
+                                                    kv.get("GPUTEMPERR", "nessun output"), "" if "CLIXML" in (r.stderr or "") else (r.stderr or "")[:300])
     _TEMP_CACHE[key] = (_t.time(), val)
     return val or 0.0
 

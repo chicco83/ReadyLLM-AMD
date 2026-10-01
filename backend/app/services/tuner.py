@@ -654,6 +654,7 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
             "ctx_size": ctx_size, "goal": goal,
             "status": "running", "logs": [], "results": [],
             "baseline": None, "best": None, "error": "",
+            "ts_start": time.time(), "meta": {"target_name": target.name, "os": target.os},   # v1.1.24: per lo storico
         }
 
     def _worker():
@@ -679,6 +680,19 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
             _append_log(job_id, f"VRAM della macchina target: {gpu_vram_gb:.1f} GB | modello: {model} "
                                 f"({model_size_gb:.1f} GB) | ctx fisso {ctx_size} | obiettivo: "
                                 f"{GOAL_LABELS.get(goal, goal)}")
+            # [2026-10-02 v1.1.24] metadati per lo storico: motore (backend + versione), GPU, dimensione modello
+            try:
+                from . import installer, collectors
+                ei = installer.detect_engine(executor, target)
+                gi = collectors._static_gpu_cached(executor, target, target.os) or {}
+                with _LOCK:
+                    _JOBS[job_id]["meta"].update({
+                        "engine": {"type": target.engine_type, "backend": ei.get("backend", ""),
+                                   "version": ei.get("version", ""), "path": ei.get("path", "")},
+                        "gpu": {"name": gi.get("name", ""), "vram_gb": round(gpu_vram_gb, 1)},
+                        "model_size_gb": round(model_size_gb, 1)})
+            except Exception:
+                pass
             all_results = []
 
             # Baseline: prima si misurano i parametri originali dell'utente
@@ -800,6 +814,13 @@ def _fail(job_id: str, err: str):
         if job:
             job["status"] = "failed"
             job["error"] = err
+            _snap = dict(job)
+        else:
+            _snap = None
+    # [2026-10-02 v1.1.24] ogni tuning concluso (anche fallito) entra nello storico (tune_log)
+    if _snap:
+        from .tune_log import add_entry
+        add_entry(_snap)
 
 
 def _finalize(job_id: str, results: List[dict], best: dict):
@@ -812,6 +833,9 @@ def _finalize(job_id: str, results: List[dict], best: dict):
         job["results"] = results
         job["best"] = best
         _tid, _model, _ctx = job["target_id"], job["model"], job["ctx_size"]
+        _snap = dict(job)
+    from .tune_log import add_entry          # [2026-10-02 v1.1.24] storico completo delle ottimizzazioni
+    add_entry(_snap)
     _append_log(job_id, f"✓ Tuning completato, consigliata: {best['label']} (punteggio {best['score']})")
     # Salva su disco gli ultimi parametri di tuning, per riempire i default della pagina Deploy
     try:

@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional, Dict
 
-from ..services import tuner, tune_history
+from ..services import tuner, tune_history, tune_log
 
 router = APIRouter()
 
@@ -111,3 +111,15 @@ def save(req: SaveTuneRequest):
         source="tuner", score=req.score,
     )
     return {"ok": True, "message": f"Salvato nei parametri di deploy di {req.model} (con ctx={req.ctx_size})"}
+
+
+@router.get("/history")
+def history(target_id: str = ""):
+    """[2026-10-02 v1.1.24] Storico di tutte le ottimizzazioni concluse (piu' recenti per prime), filtrabile per macchina"""
+    return {"entries": tune_log.list_entries(target_id)}
+
+
+@router.delete("/history/{entry_id}")
+def history_delete(entry_id: str):
+    """Elimina una voce dello storico"""
+    return {"ok": tune_log.delete_entry(entry_id)}
