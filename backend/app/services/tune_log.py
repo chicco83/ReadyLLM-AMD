@@ -94,3 +94,12 @@ def delete_entry(entry_id: str) -> bool:
             return False
         _save(new)
         return True
+
+
+def last_decode(target_id: str, model: str) -> float:
+    """[2026-10-02 v1.1.30] t/s di decodifica dell'ultimo tuning riuscito per macchina+modello (0 se non c'e'). Serve a mostrare nel
+    Deploy un valore «misurati» corretto anche per i salvataggi vecchi, che contenevano il punteggio composito."""
+    for e in list_entries(target_id):
+        if e.get("model") == model and e.get("status") == "success":
+            return float((e.get("best") or {}).get("metrics", {}).get("decode", 0) or 0)
+    return 0.0

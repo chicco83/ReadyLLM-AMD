@@ -145,7 +145,7 @@ export default function Settings({ targets, onSaved, onChanged }) {
     if (!d.ok) { setInst({ running: false, backend: v, logs: [{ t: '--:--:--', msg: d.message || t('settings.installFail') }] }); return }
     instPollRef.current = setInterval(async () => {
       const job = await (await fetch(`/api/target/install-status/${d.job_id}`)).json()
-      setInst({ running: job.status === 'running', backend: v, logs: job.logs || [] })
+      setInst({ running: job.status === 'running', backend: v, logs: job.logs || [], progress: job.progress || null })
       if (job.status === 'success' || job.status === 'failed') {
         clearInterval(instPollRef.current)
         setInst({ running: false, backend: v, logs: job.logs || [] })
@@ -444,6 +444,18 @@ export default function Settings({ targets, onSaved, onChanged }) {
                         className="bg-blue text-bg font-semibold px-4 py-1.5 rounded-lg hover:opacity-90 transition disabled:opacity-40">
                         {inst.running ? t('settings.badge.installing') : t('settings.install')}
                       </button>
+                    </div>
+                  )}
+                  {/* [2026-10-02 v1.1.30] barra di avanzamento del download da GitHub (percentuale e MB) */}
+                  {inst.progress && (
+                    <div className="mt-2">
+                      <div className="flex justify-between text-xs text-gray mb-1">
+                        <span>{t('settings.downloading')}</span>
+                        <span>{inst.progress.pct}% — {inst.progress.done_mb}{inst.progress.total_mb ? ` / ${inst.progress.total_mb}` : ''} MB</span>
+                      </div>
+                      <div className="h-2.5 rounded-full bg-bg overflow-hidden">
+                        <div className="h-full bg-blue transition-all duration-500" style={{ width: `${inst.progress.pct}%` }} />
+                      </div>
                     </div>
                   )}
                   {inst.logs.length > 0 && (

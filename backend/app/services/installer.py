@@ -434,24 +434,77 @@ def _pick_win_asset(urls: list, backend: str) -> str:
     return ""
 
 
+def _set_dl_progress(job_id: str, done: int, total: int, desc: str = ""):
+    """[2026-10-02 v1.1.30] Avanzamento del download: job["progress"] = {pct, done_mb, total_mb} (per la barra in Impostazioni) e
+    un'unica riga di log aggiornata sul posto («⬇ 45% — 120/267 MB») invece di una riga nuova a ogni controllo."""
+    with _LOCK:
+        job = _JOBS.get(job_id)
+        if not job:
+            return
+        pct = int(done * 100 / total) if total > 0 else 0
+        job["progress"] = {"pct": pct, "done_mb": round(done / 1048576, 1), "total_mb": round(total / 1048576, 1), "desc": desc}
+        msg = (f"⬇ {pct}% — {done / 1048576:.0f}/{total / 1048576:.0f} MB" if total > 0 else f"⬇ {done / 1048576:.0f} MB scaricati")
+        logs = job["logs"]
+        if logs and logs[-1].get("dl"):
+            logs[-1].update({"t": time.strftime("%H:%M:%S"), "msg": msg})
+        else:
+            logs.append({"t": time.strftime("%H:%M:%S"), "msg": msg, "dl": True})
+
+
+def _clear_dl_progress(job_id: str):
+    with _LOCK:
+        job = _JOBS.get(job_id)
+        if job:
+            job.pop("progress", None)
+
+
 def _win_download(executor: Executor, job_id: str, url: str, dest: str, desc: str):
-    """Scarica un file con TLS 1.2, fino a 3 tentativi, poi (se configurato) tramite mirror; verifica la dimensione."""
+    """Scarica un file con TLS 1.2, fino a 3 tentativi, poi (se configurato) tramite mirror; verifica la dimensione.
+    [2026-10-02 v1.1.30] Con percentuale di avanzamento: la dimensione totale si legge con una richiesta HEAD, il download gira in un
+    thread e ogni 2 s si controlla la dimensione del file parziale. Versione precedente: download in blocco, nessun avanzamento."""
+    import threading
     candidates = [url]
     if _gh_proxy():
         candidates.append(_gh_proxy() + url)
     last = ""
     for cand in candidates:
+        # dimensione totale (0 se non ricavabile: allora si mostrano solo i MB scaricati)
+        total = 0
+        try:
+            hr = executor.run('powershell -NoProfile -Command "' + _PS_PRE +
+                              f"try {{ $r=Invoke-WebRequest -Uri '{cand}' -Method Head -UseBasicParsing -Headers $h -TimeoutSec 30; "
+                              "Write-Output ('SIZE=' + $r.Headers['Content-Length']) } catch { }\"", timeout=45)
+            m = re.search(r"SIZE=(\d+)", hr.stdout or "")
+            total = int(m.group(1)) if m else 0
+        except Exception:
+            total = 0
         for attempt in (1, 2, 3):
-            r = _run_step(
-                executor, job_id,
-                'powershell -NoProfile -Command "' + _PS_PRE +
-                f"Invoke-WebRequest -Uri '{cand}' -OutFile '{dest}' -UseBasicParsing -Headers $h -TimeoutSec 900; "
-                f"if ((Get-Item '{dest}').Length -lt 1048576) {{ throw 'file scaricato troppo piccolo' }}\"",
-                f"{desc} (tentativo {attempt}/3)", timeout=1000)
-            if r.ok:
+            res = []
+            def _work():
+                res.append(_run_step(
+                    executor, job_id,
+                    'powershell -NoProfile -Command "' + _PS_PRE +
+                    f"Invoke-WebRequest -Uri '{cand}' -OutFile '{dest}' -UseBasicParsing -Headers $h -TimeoutSec 900; "
+                    f"if ((Get-Item '{dest}').Length -lt 1048576) {{ throw 'file scaricato troppo piccolo' }}\"",
+                    f"{desc} (tentativo {attempt}/3)", timeout=1000))
+            t = threading.Thread(target=_work, daemon=True)
+            t.start()
+            while t.is_alive():
+                t.join(2)
+                try:
+                    sz = executor.run(f'powershell -NoProfile -Command "if (Test-Path \'{dest}\') {{ (Get-Item \'{dest}\').Length }}"', timeout=10)
+                    m = re.search(r"(\d+)", sz.stdout or "")
+                    if m and t.is_alive():
+                        _set_dl_progress(job_id, int(m.group(1)), total, desc)
+                except Exception:
+                    pass
+            r = res[0] if res else None
+            if r is not None and r.ok and total > 0:
+                _set_dl_progress(job_id, total, total, desc)      # riga finale a 100%
+            _clear_dl_progress(job_id)
+            if r is not None and r.ok:
                 return
-            last = (r.stderr or r.stdout or "").strip().splitlines()[-1:] or ["errore sconosciuto"]
-            last = last[0]
+            last = ((r.stderr or r.stdout or "").strip().splitlines()[-1:] or ["errore sconosciuto"])[0] if r is not None else "errore sconosciuto"
     raise RuntimeError(f"Download non riuscito da {url}: {last}")
 
 

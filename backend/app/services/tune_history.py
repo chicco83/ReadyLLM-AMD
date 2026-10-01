@@ -68,6 +68,7 @@ def save_latest(
             "ctx_size": int(ctx_size),
             "source": source,
             "score": round(float(score), 2),
+            "score_kind": "decode_tps",      # [2026-10-02 v1.1.30] t/s di decodifica (i record senza questo campo hanno il punteggio composito)
             "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
         _save(data)
@@ -90,9 +91,20 @@ def get_latest(target_id: str, model: str) -> Optional[dict]:
         "params": params,
         "ctx_size": rec.get("ctx_size", 0),
         "source": rec.get("source", ""),
-        "score": rec.get("score", 0),
+        # [2026-10-02 v1.1.30] I record vecchi (senza score_kind) hanno il punteggio composito del tuning, non i t/s: mostrarlo come
+        # «misurati 42.61 t/s» era sbagliato. Si usa la decodifica dello storico tuning se c'e', altrimenti 0 (il Deploy non lo mostra).
+        # Versione precedente: "score": rec.get("score", 0)
+        "score": rec.get("score", 0) if rec.get("score_kind") == "decode_tps" else _legacy_decode(target_id, model),
         "ts": rec.get("ts", ""),
     }
+
+
+def _legacy_decode(target_id: str, model: str) -> float:
+    try:
+        from .tune_log import last_decode
+        return last_decode(target_id, model)
+    except Exception:
+        return 0.0
 
 
 def list_history() -> dict:
