@@ -91,6 +91,9 @@ export default function Settings({ targets, onSaved, onChanged }) {
   const [testResult, setTestResult] = useState(null)
   const [localOs, setLocalOs] = useState('')
   const [engines, setEngines] = useState([])
+  // [2026-10-01 v1.1.19] Aprendo le Impostazioni si modifica la macchina salvata (prima il modulo partiva sempre «nuovo»:
+  // senza id non funzionavano scelta backend/installazione e comparivano avvisi «Salva prima la macchina»)
+  const [isNew, setIsNew] = useState(false)
 
   function set(k, v) {
     setForm(f => ({ ...f, [k]: v }))
@@ -210,6 +213,7 @@ export default function Settings({ targets, onSaved, onChanged }) {
     setTestResult(null)
   }
   function newTarget() {
+    setIsNew(true)
     setForm({ ...EMPTY, os: localOs || EMPTY.os })
     setTestResult(null)
   }
@@ -230,6 +234,10 @@ export default function Settings({ targets, onSaved, onChanged }) {
       setTestResult({ ok: false, message: String(e) })
     }
   }
+
+  useEffect(() => {
+    if (!form.id && !isNew && targets && targets.length > 0) editTarget(targets[0])
+  }, [targets])
 
   async function save() {
     const res = await fetch('/api/target', {
@@ -522,6 +530,8 @@ function EngineRow({ target, onChanged }) {
   const [engine, setEngine] = useState(null)
   const [logs, setLogs] = useState([])
   const [showLogs, setShowLogs] = useState(false)
+  // [2026-10-01 v1.1.19] tutte le build di llama-server installate (Vulkan, ROCm, ...), non solo quella in uso
+  const [builds, setBuilds] = useState([])
   const pollRef = useRef(null)
 
   async function check() {
@@ -531,6 +541,9 @@ function EngineRow({ target, onChanged }) {
       const d = await res.json()
       setEngine(d)
       setState(d.installed ? 'installed' : 'missing')
+      if (target.engine_type === 'llama_cpp') {
+        fetch(`/api/target/${target.id}/engines-installed`).then(r => r.json()).then(x => setBuilds(x.builds || [])).catch(() => {})
+      }
     } catch {
       setState('missing')
     }
@@ -592,10 +605,10 @@ function EngineRow({ target, onChanged }) {
           </div>
           <div className="text-xs text-gray">
             {target.os} · {target.conn_type === 'ssh' ? target.host : t('settings.local')}
-            {engine?.version && <span className="ml-2 text-green">{engine.version}</span>}
+            {engine?.version && builds.length === 0 && <span className="ml-2 text-green">{engine.version}</span>}
           </div>
           {/* [2026-10-01 v1.1.10] Backend del llama-server installato (Vulkan / ROCm / CUDA / CPU) e dispositivi rilevati */}
-          {engine?.installed && engine.engine === 'llama_cpp' && (
+          {engine?.installed && engine.engine === 'llama_cpp' && builds.length === 0 && (
             <div className="text-xs mt-1">
               <span className="text-gray">{t('settings.backendDetected')}</span>{' '}
               <span className="px-2 py-0.5 rounded bg-purple/15 text-purple font-semibold uppercase">
@@ -624,11 +637,28 @@ function EngineRow({ target, onChanged }) {
         </div>
       </div>
 
-      {engine?.installed && engine.path && (
+      {engine?.installed && engine.path && builds.length === 0 && (
         <div className="text-xs text-gray/70 mt-2 truncate">{t('settings.path')} {engine.path}</div>
       )}
 
-      {/* [2026-10-01 v1.1.17] Build installate / Attiva / Installa per backend: spostate nel form, sotto i pulsanti del backend */}
+      {/* [2026-10-01 v1.1.19] Elenco di TUTTE le build installate con backend, versione e dispositivi; quella in uso e' marcata.
+          La messa in uso e l'installazione si fanno dai pulsanti del backend nel modulo (v1.1.17). */}
+      {target.engine_type === 'llama_cpp' && builds.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-gray/20 space-y-2">
+          {builds.map(b => (
+            <div key={b.path} className="flex items-start gap-3 text-xs">
+              <span className="px-2 py-0.5 rounded bg-purple/15 text-purple font-semibold uppercase shrink-0">{b.backend || 'cpu'}</span>
+              <div className="flex-1 min-w-0">
+                {b.version && <div className="text-green">{b.version}</div>}
+                <div className="truncate text-gray/70" title={b.path}>{b.path}</div>
+                {(b.devices || []).map((d, i) => <div key={i} className="text-gray/60">{d}</div>)}
+              </div>
+              {b.active && <span className="px-2 py-1 rounded bg-green/20 text-green font-semibold shrink-0">{t('settings.inUse')}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+
 
       {(showLogs && logs.length > 0) && (
         <div className="mt-3">

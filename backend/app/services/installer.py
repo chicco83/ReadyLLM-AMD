@@ -145,7 +145,10 @@ def find_llama_installs(executor: Executor, target: Target) -> list:
             hint = _backend_da_testo(p)
             if hint:
                 info["backend"] = "+".join(hint) + "?"
-        out.append({"path": p, "backend": info["backend"], "devices": info["devices"],
+        # [2026-10-01 v1.1.19] versione di ogni build (build NNNN, commit): il pannello «Motori di inferenza» le elenca tutte
+        vr = executor.run(f'"{p}" --version 2>&1', timeout=20)
+        ver = next((ln.strip() for ln in (vr.stdout or "").splitlines() if "version" in ln.lower()), "")
+        out.append({"path": p, "backend": info["backend"], "devices": info["devices"], "version": ver,
                     "active": bool(cur) and norm(p) == norm(cur)})
     return out
 
