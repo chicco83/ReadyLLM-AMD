@@ -1,8 +1,13 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.11** — 2026-10-01 22:29
+Versione corrente: **1.1.12** — 2026-10-01 22:39
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 14. v1.1.12 — 2026-10-01 22:39 — Motore nascosto con log, Deploy e Tuning sotto il monitoraggio
+- Windows (target locale): llama-server avviato con finestra nascosta; log visibile da «Log del motore» (`GET /api/deploy/log`).
+- Il tuning avvisa nel log che ferma e riavvia il server avviato dal Deploy.
+- Deploy e Tuning spostati sotto il Monitoraggio, con pulsanti dei passaggi in evidenza (1 ➜ 2); rimossa la voce di menu Deploy.
 
 ## 13. v1.1.11 — 2026-10-01 22:29 — Deploy→Tuning, baseline dal Deploy, MTP condizionato
 - Pagina Deploy con due schede in sequenza (Deploy, Tuning); tuning tolto da Monitoraggio (etichetta menu ripristinata). Modello condiviso tra le schede.

@@ -1,6 +1,6 @@
 # MANUALE — ReadyLLM-AMD
 
-Versione: **1.1.11** — 2026-10-01 22:29
+Versione: **1.1.12** — 2026-10-01 22:39
 
 ## 1. Avvio
 Dalla radice del progetto: `python avvia.py` (backend + frontend), `python avvia.py --installa` (installa prima le dipendenze), `python avvia.py --comandi` (stampa i comandi manuali), `--backend` / `--frontend` per avviarne uno solo. Ctrl+C li ferma entrambi. Comandi manuali:
@@ -75,3 +75,7 @@ Se la VRAM e' errata esegui `python avvia.py --diagnosi-gpu` e invia l'output (m
 - Pagina **Deploy** → scheda **1 · Deploy** (scegli modello, parametri, Avvia) e scheda **2 · Tuning** (stesso modello gia' selezionato).
 - Nel Tuning automatico la **baseline** e' la riga di parametri del Deploy (modificabile); puoi scegliere «Predefiniti del motore» o «Nessuna baseline». Se il modello o la build non supportano MTP, draft-mtp non viene proposto.
 - Il tuning ferma/riavvia llama-server: un modello avviato dal Deploy verra' fermato. «Salva e applica» scrive i parametri migliori nel Deploy.
+
+## 15. Motore senza finestra, log e passaggi in sequenza
+- Il motore parte senza finestra visibile (target locale). Per vedere cosa fa: pagina Monitoraggio → sezione Deploy → «Log del motore» (si aggiorna ogni 3 s). File: `C:\temp\llama_server.log`.
+- Sotto il monitoraggio ci sono i due passaggi **1 Deploy ➜ 2 Tuning**: prima avvia il modello, poi lancia il tuning (che ferma e riavvia il motore piu' volte: e' normale).

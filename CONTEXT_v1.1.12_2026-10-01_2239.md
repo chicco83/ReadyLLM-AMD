@@ -1,6 +1,6 @@
 # CONTEXT — ReadyLLM-AMD
 
-Versione: **1.1.11** — 2026-10-01 22:29
+Versione: **1.1.12** — 2026-10-01 22:39
 
 ## Scopo
 Assistente di deploy/tuning/monitoraggio per LLM locali (llama.cpp, vLLM, SGLang) e generazione video
@@ -82,3 +82,8 @@ Il tuning intelligente (automatico + AI) e' una sezione della pagina Monitoraggi
 - Baseline del tuning = parametri del Deploy per il modello (`GET /api/tune/baseline`: ultimo tuning o generatore), modificabile; modalita' deploy / predefiniti motore / nessuna. `POST /api/tune/start` accetta `baseline_args` (stringa); `start_tune`: `None`=nessuna baseline, `{}`=predefiniti motore.
 - MTP: `tuner.mtp_state` = modello (nome file) AND build (`llama-server --help` cita "mtp"). Se non supportato: draft-mtp non proposto nella fase coarse, parametri `spec-*`/`*draft*` tolti dalla baseline e da `/api/deploy/default-args`.
 - Limite noto: `_estimate_vram_gb` usa dimensioni KV tarate su un 27B (8192 x 64 strati): per modelli piu' piccoli e ctx molto alti sovrastima e scarta tutte le combinazioni GPU. Non ancora corretto.
+
+## Aggiornamento 1.1.12 — avvio motore su Windows, UI
+- Avvio llama-server (target locale Windows): `Start-Process -WindowStyle Hidden` invece di schtasks (resta schtasks per SSH). Causa della «shell nera»: con v1.1.8 l'output e' rediretto su `C:\temp\llama_server.log`, quindi la finestra visibile restava vuota. Nuovo `GET /api/deploy/log` e pulsante «Log del motore» nel Deploy.
+- «Si avvia due volte»: il tuning ferma il server del Deploy e lo riavvia a ogni prova (comportamento voluto); ora lo dichiara nel log del tuning.
+- UI: Deploy e Tuning sono sotto il Monitoraggio (`<Deploy embedded />` in `Monitor.jsx`), con due pulsanti a passaggi evidenziati «1 Deploy ➜ 2 Tuning»; voce di menu «Deploy» rimossa; menu «Monitoraggio e deploy».
