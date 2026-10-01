@@ -1,8 +1,13 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.17** — 2026-10-01 22:55
+Versione corrente: **1.1.18** — 2026-10-01 23:00
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 20. v1.1.18 — 2026-10-01 23:00 — Tuning: stima VRAM calibrata, utilizzo GPU, layout Deploy
+- Stima VRAM calibrata sul log reale (`llama_kv_cache: size`); niente piu' ripiego automatico su CPU: se la stima scarta tutto si provano le combinazioni q4_0 in GPU.
+- Utilizzo GPU su Windows da contatori raw (prima 0%).
+- Deploy: log del motore a destra; dopo «Avvia» passaggio automatico al Tuning.
 
 ## 19. v1.1.17 — 2026-10-01 22:55 — Backend, attivazione e installazione unificati
 - I pulsanti del backend mostrano lo stato (installato / non installato), mettono in uso la build al click e propongono l'installazione con log; rimossa la sezione duplicata sotto «Motori di inferenza».

@@ -1,6 +1,6 @@
 # MANUALE — ReadyLLM-AMD
 
-Versione: **1.1.17** — 2026-10-01 22:55
+Versione: **1.1.18** — 2026-10-01 23:00
 
 ## 1. Avvio
 Dalla radice del progetto: `python avvia.py` (backend + frontend), `python avvia.py --installa` (installa prima le dipendenze), `python avvia.py --comandi` (stampa i comandi manuali), `--backend` / `--frontend` per avviarne uno solo. Ctrl+C li ferma entrambi. Comandi manuali:
@@ -91,3 +91,6 @@ Nel log di installazione ora compare «Release bNNNN: N asset (fonte: API GitHub
 
 ## 19. Installazione: release trovata
 Il log mostra «Release bNNNNN: N asset (fonte: ...)»: se vedi un tag diverso da bNNNNN (es. v0.5.0) segnalalo. Il tag deve iniziare per `b`.
+
+## 20. Log a destra e passaggio automatico
+Nel Deploy il log del motore e' sempre visibile a destra. Dopo «Avvia» (a motore avviato) si passa automaticamente alla scheda Tuning. Nel tuning, la riga «KV cache reale: X GB» indica che le stime di VRAM sono state calibrate sul log del motore.

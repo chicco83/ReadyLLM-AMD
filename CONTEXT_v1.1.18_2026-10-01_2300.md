@@ -1,6 +1,6 @@
 # CONTEXT — ReadyLLM-AMD
 
-Versione: **1.1.17** — 2026-10-01 22:55
+Versione: **1.1.18** — 2026-10-01 23:00
 
 ## Scopo
 Assistente di deploy/tuning/monitoraggio per LLM locali (llama.cpp, vLLM, SGLang) e generazione video
@@ -103,3 +103,8 @@ Dal log dell'utente: `/releases/latest` di ggml-org/llama.cpp restituisce il tag
 
 ## Aggiornamento 1.1.17 — UI coerente per backend/installazione
 Rimossa da `EngineRow` la sezione «Build installate / Attiva / Installa»; spostata nel form sotto i pulsanti del backend (`pickBackend`, `installBackend`, `buildFor` in `Settings.jsx`). `POST /api/target/<id>/activate-engine` accetta `path` opzionale e `llama_backend`.
+
+## Aggiornamento 1.1.18 — tuning, GPU util, layout Deploy
+- Tuning dell'utente (9B Q8_0, ctx 262144, 15.8 GB): baseline in GPU 47.8 t/s, ma la stima VRAM (kv_dim 8192, 64 strati) scartava TUTTE le combinazioni GPU e il tuning ripiegava su CPU. Ora: calibrazione sulla riga reale `llama_kv_cache: size = X MiB` del log (salvata in `_JOBS[job]["kv_calib"]`), stima senza calibrazione con kv_dim 1024 e strati dedotti dalla dimensione, margine 5%; se tutto viene scartato si provano comunque le combinazioni q4_0 in GPU (niente piu' ripiego automatico su CPU).
+- Utilizzo GPU Windows: contatori `Win32_PerfRawData_GPUPerformanceCounters_GPUEngine` con due campioni a 0.7 s (le classi Formatted davano 0%). Non verificato su PC reale.
+- Deploy: comandi a sinistra e «Log del motore» a destra (come l'avanzamento del tuning); dopo «Avvia» si passa da solo al passo 2 (Tuning).
