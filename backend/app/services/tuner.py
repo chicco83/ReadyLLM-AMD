@@ -527,7 +527,8 @@ def _run_one_inner(executor, target, engine, model_path, cfg, ctx_size, job_id, 
 
 
 def _coarse_search(executor, target, engine, model_path, ctx_size,
-                   model_size_gb, gpu_vram_gb, goal, job_id, allow_mtp: bool = True) -> Optional[dict]:
+                   model_size_gb, gpu_vram_gb, goal, job_id, allow_mtp: bool = True,
+                   baseline_result: Optional[dict] = None) -> Optional[dict]:
     """Fase uno: cerca i fattori dominanti discreti spec-type x cache-type.
     n-gpu-layers e' all di default (tutto in GPU); si ripiega su 0 solo quando tutte le combinazioni all superano la VRAM,
     per non sprecare tempo di misura trattando come candidate normali combinazioni inevitabilmente lente come far girare un modello grande solo su CPU."""
@@ -562,8 +563,16 @@ def _coarse_search(executor, target, engine, model_path, ctx_size,
     _set_progress(job_id, total=_done + len(candidates) + 8)
     scored = []
     for i, cfg in enumerate(candidates):
-        r = _run_one(executor, target, engine, model_path, cfg, ctx_size,
-                     job_id, f"coarse {i+1}/{len(candidates)}")
+        # [2026-10-02 v1.1.25] Se la combinazione e' IDENTICA alla baseline si riusa la misura gia' fatta invece di rimisurarla:
+        # la stessa configurazione misurata due volte differisce di qualche punto per rumore (nel test dell'utente 68.2 / 66.0 / 65.5 t/s
+        # per la stessa riga) e il tuner la scambiava per «una variante peggiore».
+        if baseline_result and {k: str(v) for k, v in cfg.items()} == {k: str(v) for k, v in baseline_result["config"].items()}:
+            _append_log(job_id, f"  [coarse {i+1}/{len(candidates)}] identica alla baseline: riuso la misura gia' fatta")
+            _set_progress(job_id, step=True)
+            r = dict(baseline_result)
+        else:
+            r = _run_one(executor, target, engine, model_path, cfg, ctx_size,
+                         job_id, f"coarse {i+1}/{len(candidates)}")
         if r:
             r["score"] = _score(r["metrics"], goal)
             scored.append(r)
@@ -725,7 +734,8 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
             # Fase uno coarse
             coarse_best = _coarse_search(executor, target, engine, model_path,
                                          ctx_size, model_size_gb, gpu_vram_gb,
-                                         goal, job_id, allow_mtp=mtp["allowed"])
+                                         goal, job_id, allow_mtp=mtp["allowed"],
+                                         baseline_result=all_results[0] if all_results else None)
             if not coarse_best:
                 _fail(job_id, "Nessuna configurazione utilizzabile nella fase coarse (forse VRAM insufficiente)")
                 with _LOCK:
@@ -740,7 +750,17 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
             all_results.append(fine_best)
 
             # Raccomandazione finale = risultato di convergenza della fase fine; confronto con la baseline
-            final_best = fine_best if fine_best["score"] > 0 else coarse_best
+            # [2026-10-02 v1.1.25] Raccomandazione = la MIGLIORE tra tutte le misure (baseline, coarse, fine), non l'ultima fase.
+            # Prima: final_best = fine_best if fine_best["score"] > 0 else coarse_best  -> poteva consigliare una configurazione
+            # PEGGIORE della baseline (68.23 -> 65.5 t/s, -4%) perche' la fase fine rimisura la stessa riga con rumore.
+            # Una variante sostituisce la tua configurazione solo se la supera di almeno il margine di rumore (3%).
+            NOISE = 1.03
+            pool = [r for r in all_results if r.get("score", 0) > 0]
+            final_best = max(pool, key=lambda r: r["score"]) if pool else coarse_best
+            base_r = all_results[0] if all_results and all_results[0] is _JOBS[job_id].get("baseline") else None
+            if base_r and final_best is not base_r and final_best["score"] < base_r["score"] * NOISE:
+                final_best = base_r
+                _append_log(job_id, "  Nessuna variante supera la tua configurazione attuale oltre il margine di rumore (3%): resta consigliata quella.")
             _finalize(job_id, all_results, final_best)
         except Exception as e:
             _fail(job_id, str(e))
@@ -825,8 +845,11 @@ def _fail(job_id: str, err: str):
 
 def _finalize(job_id: str, results: List[dict], best: dict):
     # Segna la raccomandazione
+    # [2026-10-02 v1.1.25] una sola riga consigliata (prima: ogni riga con la stessa etichetta, anche ripetuta)
     for r in results:
-        r["recommended"] = (r["label"] == best["label"])
+        r["recommended"] = (r is best)
+    if not any(r.get("recommended") for r in results):
+        best["recommended"] = True
     with _LOCK:
         job = _JOBS[job_id]
         job["status"] = "success"
