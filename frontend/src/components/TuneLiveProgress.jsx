@@ -8,6 +8,9 @@ export default function TuneLiveProgress({ targetId }) {
   const { t } = useI18n()
   const [job, setJob] = useState(null)
   const [showLog, setShowLog] = useState(true)
+  // [2026-10-02 v1.1.22] Dettaglio del motore (backend + versione, es. «ROCM — version: 0.5.0-dev (build 11327, commit ...)»)
+  // mostrato al centro della barra; si legge una volta sola quando parte un tuning (GET /api/target/<id>/engine).
+  const [engineInfo, setEngineInfo] = useState('')
 
   useEffect(() => {
     if (!targetId) return
@@ -24,6 +27,16 @@ export default function TuneLiveProgress({ targetId }) {
     return () => { stop = true; clearInterval(id) }
   }, [targetId])
 
+  const running = !!job
+  useEffect(() => {
+    if (!running || !targetId || engineInfo) return
+    fetch(`/api/target/${targetId}/engine`).then(r => r.json()).then(d => {
+      const be = (d.backend || '').toUpperCase()
+      const ver = d.version || ''
+      setEngineInfo([be, ver].filter(Boolean).join(' — '))
+    }).catch(() => {})
+  }, [running, targetId])
+
   if (!job) return null
   const pr = job.progress || { done: 0, total: 1, phase: '' }
   const pct = Math.min(99, Math.round((pr.done / Math.max(pr.total, 1)) * 100))
@@ -38,8 +51,12 @@ export default function TuneLiveProgress({ targetId }) {
           {showLog ? t('tune.liveHideLog') : t('tune.liveShowLog')}
         </button>
       </div>
-      <div className="h-3 rounded-full bg-bg overflow-hidden">
-        <div className="h-full bg-blue transition-all duration-500" style={{ width: `${pct}%` }} />
+      {/* Versione precedente: barra sottile h-3 senza testo. Ora piu' alta, con il motore al centro. */}
+      <div className="relative h-7 rounded-full bg-bg overflow-hidden">
+        <div className="h-full bg-blue/60 transition-all duration-500" style={{ width: `${pct}%` }} />
+        <div className="absolute inset-0 flex items-center justify-center px-3 text-xs font-semibold text-fg truncate" title={engineInfo}>
+          {engineInfo}
+        </div>
       </div>
       {showLog && (
         <div className="mt-3 bg-bg rounded-lg p-3 font-mono text-xs text-fg/80 space-y-0.5 max-h-40 overflow-auto">
