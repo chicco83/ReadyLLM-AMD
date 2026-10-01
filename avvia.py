@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Avvio di backend (FastAPI) e frontend (Vite) di ReadyLLM-AMD
 
-Versione: 1.1.4 — 2026-10-01 22:25
+Versione: 1.1.5 — 2026-10-01 22:40
 
 Uso (dalla radice del progetto, Windows / Linux / macOS):
     python avvia.py              # avvia backend + frontend
@@ -34,11 +34,15 @@ CMD_BACKEND = [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0
 CMD_FRONTEND = "npm run dev"
 
 
-# [2026-10-01 v1.1.4] Cartelle su Google Drive per desktop ("Il mio Drive" / "My Drive"): e' un disco virtuale
+# [2026-10-01 v1.1.5] Cartelle su Google Drive per desktop ("Il mio Drive" / "My Drive"): e' un disco virtuale
 # che fa fallire npm con centinaia di errori TAR_ENTRY_ERROR (EBADF / EPERM / UNKNOWN) mentre scrive
-# migliaia di piccoli file in node_modules, lasciando l'installazione corrotta.
-# Rimedio automatico (solo Windows): node_modules viene creato su disco LOCALE e collegato con una
-# giunzione (mklink /J), cosi' npm scrive sul disco locale e Drive non vede i file.
+# migliaia di piccoli file in node_modules.
+# [2026-10-01 v1.1.4, SOSTITUITO] Si era provato a collegare node_modules a una cartella locale con una
+# giunzione (mklink /J), ma fallisce: "sono necessari volumi NTFS locali" (G: di Drive non e' NTFS).
+# Soluzione attuale (solo Windows): il frontend viene COPIATO in una cartella locale
+# (%LOCALAPPDATA%\ReadyLLM-AMD\frontend, con robocopy, escludendo node_modules) e npm/vite girano da li'.
+# La copia si rinnova a ogni avvio, quindi le modifiche ai sorgenti su Drive vengono riprese al riavvio
+# (non c'e' hot-reload tra Drive e la copia locale mentre il server e' acceso).
 SEGNI_DRIVE = ("il mio drive", "my drive", "google drive", "googledrive")
 
 
@@ -47,22 +51,26 @@ def su_drive(percorso: str) -> bool:
     return any(sg in p for sg in SEGNI_DRIVE)
 
 
-def prepara_node_modules_locale():
-    """Se il frontend e' su Drive (Windows), sposta node_modules su disco locale tramite giunzione."""
-    if os.name != "nt" or not su_drive(FRONTEND):
-        return
-    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
-    locale = os.path.join(base, "ReadyLLM-AMD", "node_modules")
-    link = os.path.join(FRONTEND, "node_modules")
-    print(f"⚠ Progetto su Google Drive: node_modules verra' creato in {locale} (giunzione)")
-    os.makedirs(locale, exist_ok=True)
-    if os.path.lexists(link):
-        # Elimina la cartella corrotta (o la vecchia giunzione) senza seguire i file: rmdir /s /q
-        subprocess.call(f'rmdir /s /q "{link}"', shell=True)
-    if not os.path.lexists(link):
-        subprocess.check_call(f'mklink /J "{link}" "{locale}"', shell=True)
-    else:
-        print("✗ Impossibile rimuovere frontend\\node_modules: sospendere Drive o spostare il progetto in C:\\dev")
+def cartella_frontend() -> str:
+    """Cartella da cui eseguire npm/vite: quella del progetto, o la copia locale se il progetto e' su Drive."""
+    if os.name == "nt" and su_drive(FRONTEND):
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "ReadyLLM-AMD", "frontend")
+    return FRONTEND
+
+
+def sincronizza_frontend_locale() -> str:
+    """Se serve, copia il frontend su disco locale (robocopy /MIR, node_modules escluso). Restituisce la cartella da usare."""
+    dest = cartella_frontend()
+    if dest == FRONTEND:
+        return FRONTEND
+    print(f"⚠ Progetto su Google Drive: il frontend viene eseguito da una copia locale: {dest}")
+    os.makedirs(dest, exist_ok=True)
+    # /MIR specchia la cartella; /XD node_modules evita di cancellare/copiare le dipendenze; exit code < 8 = successo
+    rc = subprocess.call(f'robocopy "{FRONTEND}" "{dest}" /MIR /XD node_modules dist /NFL /NDL /NJH /NJS /NP', shell=True)
+    if rc >= 8:
+        raise SystemExit(f"✗ Copia del frontend non riuscita (robocopy codice {rc})")
+    return dest
 
 
 def stampa_comandi():
@@ -85,12 +93,7 @@ def main():
         if avvia_be:
             subprocess.check_call(CMD_INSTALLA_BACKEND, cwd=BACKEND)
         if avvia_fe:
-            prepara_node_modules_locale()
-            subprocess.check_call(CMD_INSTALLA_FRONTEND, cwd=FRONTEND, shell=True)
-
-    if su_drive(FRONTEND) and "--installa" not in args:
-        print("⚠ Progetto su Google Drive: se npm install ha dato errori TAR_ENTRY_ERROR rilanciare con --installa "
-              "(usa node_modules locale) oppure spostare il progetto in C:\\dev")
+            subprocess.check_call(CMD_INSTALLA_FRONTEND, cwd=sincronizza_frontend_locale(), shell=True)
 
     processi = []
     try:
@@ -98,10 +101,11 @@ def main():
             print("▶ Backend:  http://127.0.0.1:8000")
             processi.append(subprocess.Popen(CMD_BACKEND, cwd=BACKEND))
         if avvia_fe:
-            if not os.path.isdir(os.path.join(FRONTEND, "node_modules")):
+            fe_dir = sincronizza_frontend_locale()
+            if not os.path.isdir(os.path.join(fe_dir, "node_modules")):
                 print("⚠ node_modules assente nel frontend: eseguire prima  python avvia.py --installa")
             print("▶ Frontend: http://localhost:3000")
-            processi.append(subprocess.Popen(CMD_FRONTEND, cwd=FRONTEND, shell=True))
+            processi.append(subprocess.Popen(CMD_FRONTEND, cwd=fe_dir, shell=True))
         # Resta in attesa; se un processo termina da solo si ferma anche l'altro
         while all(p.poll() is None for p in processi):
             time.sleep(1)
