@@ -145,3 +145,61 @@ def list_engines():
     """Restituisce i metadati di tutti i motori di inferenza disponibili (nome/piattaforme supportate/formato modelli/suggerimenti di installazione), per il rendering dinamico del frontend"""
     from ..services.engine_registry import list_engines as _list
     return {"engines": _list()}
+
+
+# ==================== Finestra nativa di selezione file/cartella (v1.1.10) ====================
+# [2026-10-01 v1.1.10] Il browser non puo' fornire il percorso completo di un file/cartella, ma il backend gira sulla
+# STESSA macchina dell'utente quando il target e' «locale»: puo' quindi aprire la classica finestra di Windows (Tkinter,
+# incluso in Python) e restituire il percorso scelto. Il dialogo gira in un sottoprocesso (Tk vuole il thread principale).
+# Non disponibile per target remoti (SSH): il percorso va digitato.
+_PICK_SCRIPT = r"""
+import sys, json
+import tkinter as tk
+from tkinter import filedialog
+kind, title, initial = sys.argv[1], sys.argv[2], sys.argv[3]
+root = tk.Tk(); root.withdraw()
+root.attributes("-topmost", True)   # porta la finestra davanti al browser
+kw = {"title": title, "parent": root}
+if initial:
+    kw["initialdir"] = initial
+if kind == "folder":
+    p = filedialog.askdirectory(**kw)
+else:
+    kw["filetypes"] = [("llama-server", "llama-server*"), ("Eseguibili", "*.exe"), ("Tutti i file", "*.*")]
+    p = filedialog.askopenfilename(**kw)
+root.destroy()
+print(json.dumps({"path": p or ""}))
+"""
+
+
+class PickRequest(BaseModel):
+    kind: str = "folder"          # folder | file
+    title: str = ""
+    initial: str = ""             # cartella iniziale (facoltativa)
+
+
+@router.post("/pick")
+def pick_path(req: PickRequest):
+    """Apre la finestra nativa di selezione cartella/file sulla macchina che esegue il backend."""
+    import json
+    import os
+    import subprocess
+    import sys
+    initial = req.initial if req.initial and os.path.isdir(req.initial) else ""
+    try:
+        r = subprocess.run(
+            [sys.executable, "-c", _PICK_SCRIPT, req.kind, req.title or "Seleziona", initial],
+            capture_output=True, text=True, timeout=600)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "message": "Selezione scaduta"}
+    except Exception as e:
+        return {"ok": False, "message": f"Impossibile aprire la finestra: {e}"}
+    if r.returncode != 0:
+        return {"ok": False, "message": "Finestra di selezione non disponibile su questa macchina (Tkinter mancante o nessuno schermo)"}
+    try:
+        path = json.loads(r.stdout.strip().splitlines()[-1]).get("path", "")
+    except Exception:
+        return {"ok": False, "message": "Risposta non valida dalla finestra di selezione"}
+    if not path:
+        return {"ok": True, "path": "", "cancelled": True}
+    return {"ok": True, "path": os.path.normpath(path)}   # Tk restituisce barre "/", su Windows si normalizza in "\"

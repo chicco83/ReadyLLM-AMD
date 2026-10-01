@@ -73,6 +73,52 @@ def _join(base: str, name: str) -> str:
     return base.rstrip("/\\") + sep + name
 
 
+# [2026-10-01 v1.1.10] Quale backend ha il llama-server installato? Prima bastava che il file esistesse e non si
+# sapeva se fosse Vulkan, ROCm, CUDA o CPU. Due indizi:
+#   1) i file backend accanto all'eseguibile (build Windows: ggml-vulkan.dll / ggml-hip.dll / ggml-cuda.dll;
+#      Linux dinamico: libggml-*.so) = backend DISPONIBILI nel pacchetto
+#   2) "llama-server --list-devices": elenca i dispositivi realmente utilizzabili (Vulkan0, ROCm0, CUDA0...)
+#      = backend EFFETTIVI su questa macchina (e' l'indizio piu' affidabile: una DLL hip senza GPU compatibile non compare)
+_BACKEND_NAMES = (("vulkan", "vulkan"), ("hip", "rocm"), ("rocm", "rocm"), ("cuda", "cuda"),
+                  ("metal", "metal"), ("sycl", "sycl"), ("opencl", "opencl"))
+
+
+def _backend_da_testo(testo: str) -> list:
+    t = (testo or "").lower()
+    trovati = []
+    for chiave, nome in _BACKEND_NAMES:
+        if chiave in t and nome not in trovati:
+            trovati.append(nome)
+    return trovati
+
+
+def detect_llama_backends(executor: Executor, target: Target, exe: str) -> dict:
+    """Restituisce {"backends": [...], "backend": "vulkan|rocm|cuda|cpu|...", "devices": [...]} per un llama-server."""
+    exe_dir = exe.replace("\\", "/").rsplit("/", 1)[0] if ("/" in exe.replace("\\", "/")) else ""
+    dll = []
+    if exe_dir:
+        if target.os == "windows":
+            r = executor.run(f'dir /b "{exe_dir}\\ggml-*.dll" 2>nul', timeout=10)
+        else:
+            r = executor.run(f'ls "{exe_dir}" 2>/dev/null | grep -i ggml', timeout=10)
+        dll = _backend_da_testo(r.stdout)
+    devices = []
+    effettivi = []
+    r = executor.run(f'"{exe}" --list-devices 2>&1', timeout=40)
+    for ln in (r.stdout or "").splitlines():
+        m = re.match(r"^\s*([A-Za-z]+)(\d+):\s*(.+)$", ln)
+        if m and m.group(1).lower() not in ("cpu",):
+            devices.append(ln.strip())
+            for nome in _backend_da_testo(m.group(1)):
+                if nome not in effettivi:
+                    effettivi.append(nome)
+    if not effettivi:
+        # Alcune build non supportano --list-devices: si cercano i messaggi di inizializzazione (ggml_vulkan: ..., ggml_cuda_init: ...)
+        effettivi = _backend_da_testo(r.stdout)
+    backends = effettivi or dll
+    return {"backends": backends, "backend": "+".join(backends) if backends else "cpu", "devices": devices}
+
+
 def _detect_llama(executor: Executor, target: Target) -> dict:
     """Rileva se il binario llama-server esiste"""
     exe = target.engine_path
@@ -87,15 +133,21 @@ def _detect_llama(executor: Executor, target: Target) -> dict:
         found = "FOUND" in result.stdout
 
     version = ""
+    info = {"backends": [], "backend": "", "devices": []}
     if found:
-        vr = executor.run(f'"{exe}" --version 2>&1 | head -1', timeout=10)
-        version = vr.stdout.strip()
+        # [2026-10-01 v1.1.10] "--version | head -1": su Windows 'head' non esiste; si legge la prima riga in Python
+        vr = executor.run(f'"{exe}" --version 2>&1', timeout=15)
+        version = (vr.stdout or "").strip().splitlines()[0] if (vr.stdout or "").strip() else ""
+        info = detect_llama_backends(executor, target, exe)
 
     return {
         "installed": found,
         "engine": "llama_cpp",
         "path": exe,
         "version": version,
+        "backend": info["backend"],        # es. "vulkan", "rocm", "cuda", "cpu"
+        "backends": info["backends"],
+        "devices": info["devices"],        # es. ["Vulkan0: AMD Radeon RX 9070 XT (16304 MiB ...)"]
         "reason": "" if found else "llama-server non trovato nel percorso indicato",
     }
 
@@ -325,15 +377,18 @@ def _win_download(executor: Executor, job_id: str, url: str, dest: str, desc: st
 
 def _install_windows(executor: Executor, job_id: str, target: Target) -> str:
     """Scarica il pacchetto precompilato ufficiale (secondo il backend scelto) e lo decomprime, restituisce l'engine_path dopo l'installazione"""
-    install_dir = r"C:\llama"
+    # [2026-10-01 v1.1.10] Una cartella per backend (C:\\llama\\vulkan, C:\\llama\\rocm, ...): installare ROCm dopo Vulkan
+    # non sovrascrive piu' i file e si sa sempre quale backend e' dove.
+    # Versione precedente: install_dir = r"C:\llama"
+    backend = resolve_llama_backend(executor, target)
+    install_dir = r"C:\llama" + "\\" + backend
     _run_step(executor, job_id,
               f'powershell -Command "New-Item -ItemType Directory -Force -Path {install_dir} | Out-Null"',
-              "Creazione della cartella di installazione C:\\llama")
+              f"Creazione della cartella di installazione {install_dir}")
 
     # [2026-10-01 v1.1.0] Il pacchetto dipende dal backend scelto (cuda/rocm/vulkan/cpu).
     # Versione precedente (sostituita): scaricava SEMPRE il pacchetto CUDA, inutile su Radeon:
     #   $a=$r.assets | Where-Object { $_.name -match 'bin-win-cuda-cu12' -and $_.name -match 'x64' } | Select-Object -First 1
-    backend = resolve_llama_backend(executor, target)
     _append_log(job_id, f"▶ Backend llama.cpp selezionato: {backend.upper()} "
                         f"(impostazione: {getattr(target, 'llama_backend', 'auto')})")
     urls = _win_release_urls(executor, job_id)
@@ -345,7 +400,7 @@ def _install_windows(executor: Executor, job_id: str, target: Target) -> str:
             f"Asset Windows disponibili: {avail}")
     _append_log(job_id, f"  Sorgente download: {url}")
 
-    zip_path = r"C:\llama\llama.zip"
+    zip_path = install_dir + "\\llama.zip"
     _win_download(executor, job_id, url, zip_path, "Download del pacchetto precompilato (puo' essere grande, attendere)")
     _run_step(executor, job_id,
               f'powershell -Command "Expand-Archive -Path \'{zip_path}\' -DestinationPath \'{install_dir}\' -Force"',
@@ -356,7 +411,7 @@ def _install_windows(executor: Executor, job_id: str, target: Target) -> str:
         cudart = next((u for u in urls if u.rsplit("/", 1)[-1].lower().startswith("cudart")
                        and "x64" in u.lower() and u.lower().endswith(".zip")), "")
         if cudart:
-            cz = r"C:\llama\cudart.zip"
+            cz = install_dir + "\\cudart.zip"
             _win_download(executor, job_id, cudart, cz, "Download delle DLL runtime CUDA (cudart)")
             _run_step(executor, job_id,
                       f'powershell -Command "Expand-Archive -Path \'{cz}\' -DestinationPath \'{install_dir}\' -Force"',
@@ -442,7 +497,10 @@ def _install_linux(executor: Executor, job_id: str, target: Target) -> str:
               "command -v cmake && command -v git && command -v g++",
               "Verifica delle dipendenze di compilazione (cmake/git/g++)", timeout=30, check=True)
 
-    build_dir = "/tmp/llama.cpp"
+    # [2026-10-01 v1.1.10] Cartella di compilazione per backend, cosi' Vulkan e ROCm non si sovrascrivono.
+    # Versione precedente: build_dir = "/tmp/llama.cpp"
+    backend = resolve_llama_backend(executor, target)
+    build_dir = f"/tmp/llama.cpp-{backend}"
     _run_step(executor, job_id,
               f"rm -rf {build_dir} && git clone --depth 1 https://github.com/ggml-org/llama.cpp {build_dir}",
               "Clonazione dei sorgenti di llama.cpp", timeout=600, check=True)
@@ -450,7 +508,6 @@ def _install_linux(executor: Executor, job_id: str, target: Target) -> str:
     # [2026-10-01 v1.1.0] Backend scelto (cuda/rocm/vulkan/cpu) -> flag cmake / variabili ambiente.
     # Versione precedente (sostituita): solo CUDA se nvcc presente, altrimenti CPU:
     #   cuda = executor.run("command -v nvcc"); cmake_flag = "-DGGML_CUDA=ON" if cuda.stdout else ""
-    backend = resolve_llama_backend(executor, target)
     _append_log(job_id, f"▶ Backend llama.cpp selezionato: {backend.upper()} "
                         f"(impostazione: {getattr(target, 'llama_backend', 'auto')})")
     env_prefix = ""

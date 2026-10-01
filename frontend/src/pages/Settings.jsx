@@ -156,6 +156,23 @@ export default function Settings({ targets, onSaved, onChanged }) {
     setTestResult(null)
   }
 
+  // [2026-10-01 v1.1.10] Finestra nativa di Windows per scegliere file/cartella (solo target locale: il backend apre
+  // la finestra sulla stessa macchina). Per i target remoti il percorso si digita a mano.
+  async function browse(kind, field) {
+    try {
+      const res = await fetch('/api/target/pick', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, title: kind === 'file' ? t('settings.pickEngine') : t('settings.pickModels') }),
+      })
+      const d = await res.json()
+      if (!d.ok) { setTestResult({ ok: false, message: d.message }); return }
+      if (d.path) set(field, d.path)
+    } catch (e) {
+      setTestResult({ ok: false, message: String(e) })
+    }
+  }
+
   async function save() {
     const res = await fetch('/api/target', {
       method: 'POST',
@@ -295,12 +312,21 @@ export default function Settings({ targets, onSaved, onChanged }) {
                 : t('settings.enginePathHint')
           }
         >
-          <input
-            className={inputCls}
-            placeholder={enginePlaceholder(form.engine_type, form.os, t)}
-            value={form.engine_path}
-            onChange={e => set('engine_path', e.target.value)}
-          />
+          <div className="flex gap-2">
+            <input
+              className={inputCls}
+              placeholder={enginePlaceholder(form.engine_type, form.os, t)}
+              value={form.engine_path}
+              onChange={e => set('engine_path', e.target.value)}
+            />
+            {/* Sfoglia: solo target locale e motori con eseguibile (llama.cpp) */}
+            {!isRemote && form.engine_type === 'llama_cpp' && (
+              <button type="button" onClick={() => browse('file', 'engine_path')}
+                className="shrink-0 px-3 rounded-lg border border-blue text-blue text-sm hover:bg-blue/10 transition">
+                {t('settings.browse')}
+              </button>
+            )}
+          </div>
         </Field>
 
         {/* [2026-10-01 v1.1.0] Scelta backend llama.cpp (ROCm / Vulkan / CUDA / CPU) */}
@@ -330,12 +356,20 @@ export default function Settings({ targets, onSaved, onChanged }) {
                 : t('settings.modelsDirLlama')
           }
         >
-          <input
-            className={inputCls}
-            placeholder={modelsPlaceholder(form.os)}
-            value={form.models_dir}
-            onChange={e => set('models_dir', e.target.value)}
-          />
+          <div className="flex gap-2">
+            <input
+              className={inputCls}
+              placeholder={modelsPlaceholder(form.os)}
+              value={form.models_dir}
+              onChange={e => set('models_dir', e.target.value)}
+            />
+            {!isRemote && (
+              <button type="button" onClick={() => browse('folder', 'models_dir')}
+                className="shrink-0 px-3 rounded-lg border border-blue text-blue text-sm hover:bg-blue/10 transition">
+                {t('settings.browse')}
+              </button>
+            )}
+          </div>
         </Field>
 
         <Field label={t('settings.servicePort')} hint={t('settings.servicePortHint')}>
@@ -468,6 +502,18 @@ function EngineRow({ target, onChanged }) {
             {target.os} · {target.conn_type === 'ssh' ? target.host : t('settings.local')}
             {engine?.version && <span className="ml-2 text-green">{engine.version}</span>}
           </div>
+          {/* [2026-10-01 v1.1.10] Backend del llama-server installato (Vulkan / ROCm / CUDA / CPU) e dispositivi rilevati */}
+          {engine?.installed && engine.engine === 'llama_cpp' && (
+            <div className="text-xs mt-1">
+              <span className="text-gray">{t('settings.backendDetected')}</span>{' '}
+              <span className="px-2 py-0.5 rounded bg-purple/15 text-purple font-semibold uppercase">
+                {engine.backend || 'cpu'}
+              </span>
+              {(engine.devices || []).map((d, i) => (
+                <span key={i} className="ml-2 text-gray/70">{d}</span>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <span className={`text-xs px-2 py-1 rounded-full ${badge.cls}`}>{badge.text}</span>
