@@ -166,6 +166,73 @@ def _fits_vram(cfg: dict, model_size_gb: float, ctx_size: int, gpu_vram_gb: floa
     return est <= gpu_vram_gb * 0.9
 
 
+# ==================== Baseline = parametri del Deploy; supporto MTP (v1.1.11, 2026-10-01) ====================
+# Prima la baseline era FISSA nel frontend (draft-mtp / q4_0 / batch 4096): con un modello o una build senza MTP il
+# primo avvio andava in timeout e il tuning ripartiva da una base sbagliata. Ora la baseline e' la riga di parametri
+# del Deploy per quel modello (ultimo tuning o generatore deterministico), modificabile; e draft-mtp viene proposto
+# solo se supportato sia dal modello (nome file) sia dalla build di llama-server (--help cita "mtp").
+
+# Parametri gestiti da _args_list (aggiunti a parte) o dal Deploy: non vanno nel dict di configurazione
+_ARGS_ESCLUSI = {"ctx-size", "c", "port", "host", "metrics", "flash-attn", "fit", "model", "m", "no-webui", "parallel"}
+_SPEC_KEYS = ("spec-type", "spec-draft-n-max", "spec-draft-n-min")
+_MTP_BUILD_CACHE: dict = {}
+
+
+def parse_args_to_cfg(args_str: str) -> dict:
+    """Converte "--cache-type-k q4_0 --batch-size 4096 ..." nel dict di configurazione del tuner (chiavi senza --)."""
+    toks = (args_str or "").split()
+    cfg, i = {}, 0
+    while i < len(toks):
+        t = toks[i]
+        if t.startswith("--") and len(t) > 2:
+            key = t[2:]
+            if i + 1 < len(toks) and not toks[i + 1].startswith("--"):
+                val = toks[i + 1]
+                i += 1
+            else:
+                val = ""
+            if key == "gpu-layers":
+                key = "n-gpu-layers"
+            if key not in _ARGS_ESCLUSI and val != "":
+                cfg[key] = val
+        i += 1
+    return cfg
+
+
+def cfg_to_args(cfg: dict) -> str:
+    return " ".join(f"--{k} {v}" for k, v in cfg.items())
+
+
+def is_spec_key(k: str) -> bool:
+    """Parametro di decodifica speculativa/draft (spec-type, spec-draft-*, spec-draft-ngl, gpu-layers-draft, ...)."""
+    return k.startswith("spec-") or "draft" in k
+
+
+def strip_mtp(cfg: dict) -> dict:
+    """Toglie dal dict i parametri di decodifica speculativa MTP.
+    [2026-10-01 v1.1.11] prima solo _SPEC_KEYS (3 chiavi): restavano --gpu-layers-draft e --spec-draft-ngl, che con
+    un llama-server senza MTP fanno fallire l'avvio. Versione precedente: {k: v ... if k not in _SPEC_KEYS}"""
+    return {k: v for k, v in cfg.items() if not is_spec_key(k)}
+
+
+def mtp_state(executor: Executor, target: Target, model: str) -> dict:
+    """{"model": bool, "build": bool|None, "allowed": bool}: MTP e' proponibile con questo modello e questa build?
+    model: dedotto dal nome del file (config_generator._supports_mtp). build: llama-server --help cita 'mtp'?
+    (None se non si riesce a interrogare: in tal caso conta solo il modello)."""
+    from .config_generator import _supports_mtp
+    model_ok = bool(_supports_mtp(model))
+    key = (target.id, target.engine_path)
+    if key not in _MTP_BUILD_CACHE:
+        try:
+            r = executor.run(f'"{target.engine_path}" --help 2>&1', timeout=40)
+            txt = (r.stdout or "") + (r.stderr or "")
+            _MTP_BUILD_CACHE[key] = ("mtp" in txt.lower()) if len(txt) > 200 else None
+        except Exception:
+            _MTP_BUILD_CACHE[key] = None
+    build = _MTP_BUILD_CACHE[key]
+    return {"model": model_ok, "build": build, "allowed": model_ok and build is not False}
+
+
 # ==================== Misura della velocita' ====================
 
 # [2026-10-01 v1.1.8] timeout 120 -> 300 s: un modello Q8_0 letto da disco lento / Drive puo' superare 2 minuti
@@ -385,13 +452,14 @@ def _run_one(executor: Executor, target: Target, engine: LlamaCppAdapter,
 
 
 def _coarse_search(executor, target, engine, model_path, ctx_size,
-                   model_size_gb, gpu_vram_gb, goal, job_id) -> Optional[dict]:
+                   model_size_gb, gpu_vram_gb, goal, job_id, allow_mtp: bool = True) -> Optional[dict]:
     """Fase uno: cerca i fattori dominanti discreti spec-type x cache-type.
     n-gpu-layers e' all di default (tutto in GPU); si ripiega su 0 solo quando tutte le combinazioni all superano la VRAM,
     per non sprecare tempo di misura trattando come candidate normali combinazioni inevitabilmente lente come far girare un modello grande solo su CPU."""
     def _build(ngl):
         out = []
-        for spec in SPEC_OPTIONS:
+        # [2026-10-01 v1.1.11] senza supporto MTP si prova solo spec-type=off (prima si provava sempre anche draft-mtp)
+        for spec in (SPEC_OPTIONS if allow_mtp else [o for o in SPEC_OPTIONS if o == "off"]):
             for cache in CACHE_OPTIONS:
                 cfg = _normalize_cfg(spec, cache, ngl,
                                      CONTINUOUS_GRID["batch-size"][1],
@@ -480,6 +548,7 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
                model_size_gb: float = 0.0) -> dict:
     """Avvia il task di tuning in due fasi.
     baseline_cfg: parametri originali dell'utente (dict), misurati per primi come gruppo di confronto di baseline.
+    [2026-10-01 v1.1.11] None = nessuna baseline; {} = baseline con i parametri predefiniti del motore.
     model_size_gb: dimensione del modello, per la pre-verifica della VRAM; se omessa vale 0 e la pre-verifica viene saltata.
     """
     target = get_target(target_id)
@@ -529,9 +598,20 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
             all_results = []
 
             # Baseline: prima si misurano i parametri originali dell'utente
-            if baseline_cfg:
-                _append_log(job_id, "[Baseline] test della tua configurazione attuale")
-                b = _run_one(executor, target, engine, model_path, baseline_cfg,
+            # [2026-10-01 v1.1.11] Stato MTP (modello + build) e baseline sanificata.
+            # Versione precedente: if baseline_cfg:  (baseline sempre quella fissa del frontend; {} = nessuna baseline)
+            mtp = mtp_state(executor, target, model)
+            _append_log(job_id, f"Supporto MTP: modello={'si' if mtp['model'] else 'no'} | "
+                                f"build={'si' if mtp['build'] else ('no' if mtp['build'] is False else 'non verificabile')} "
+                                f"-> {'draft-mtp proposto' if mtp['allowed'] else 'draft-mtp escluso'}")
+            cfg_base = baseline_cfg
+            if cfg_base is not None and not mtp["allowed"] and any(is_spec_key(k) for k in cfg_base):
+                cfg_base = strip_mtp(cfg_base)
+                _append_log(job_id, "  Baseline: parametri di decodifica speculativa (MTP) rimossi perche' non supportati")
+            if cfg_base is not None:
+                _append_log(job_id, "[Baseline] test della tua configurazione attuale" if cfg_base
+                            else "[Baseline] test con i parametri predefiniti del motore")
+                b = _run_one(executor, target, engine, model_path, cfg_base,
                              ctx_size, job_id, "baseline")
                 if b:
                     b["score"] = _score(b["metrics"], goal)
@@ -543,7 +623,7 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
             # Fase uno coarse
             coarse_best = _coarse_search(executor, target, engine, model_path,
                                          ctx_size, model_size_gb, gpu_vram_gb,
-                                         goal, job_id)
+                                         goal, job_id, allow_mtp=mtp["allowed"])
             if not coarse_best:
                 _fail(job_id, "Nessuna configurazione utilizzabile nella fase coarse (forse VRAM insufficiente)")
                 with _LOCK:

@@ -18,16 +18,45 @@ class TuneRequest(BaseModel):
     ctx_size: int = 8192                 # lunghezza di contesto fissata dall'utente (vincolo, non ottimizzata)
     goal: str = "latency"                # latency | throughput | prefill
     baseline_cfg: Optional[Dict] = None  # parametri attuali dell'utente, misurati prima come baseline di confronto
+    # [2026-10-01 v1.1.11] baseline come riga di comando (dal pannello del tuning, modificabile): se presente ha la priorita'
+    # su baseline_cfg. Stringa vuota = parametri predefiniti del motore; assente/None = nessuna baseline (o baseline_cfg).
+    baseline_args: Optional[str] = None
     model_size_gb: float = 0.0           # GB dei pesi del modello; se 0 il backend lo rileva automaticamente
 
 
 @router.post("/start")
 def start(req: TuneRequest):
     """Avvia il task di tuning in due fasi"""
+    cfg = req.baseline_cfg
+    if req.baseline_args is not None:
+        cfg = tuner.parse_args_to_cfg(req.baseline_args)
     return tuner.start_tune(
         req.target_id, req.model, req.ctx_size, req.goal,
-        req.baseline_cfg, req.model_size_gb,
+        cfg, req.model_size_gb,
     )
+
+
+@router.get("/baseline")
+def baseline(target_id: str, model: str):
+    """[2026-10-01 v1.1.11] Baseline proposta per il tuning = parametri del Deploy per questo modello (ultimo tuning o generatore
+    deterministico), senza i parametri MTP se modello/build non li supportano. Restituisce anche lo stato MTP."""
+    from . import deploy
+    from ..models.target import get_target
+    from ..services.executor import make_executor
+    target = get_target(target_id)
+    if not target:
+        return {"ok": False, "message": "Macchina target inesistente"}
+    d = deploy.default_args(target_id, model)
+    cfg = tuner.parse_args_to_cfg(d.get("args", ""))
+    ex = make_executor(target)
+    try:
+        mtp = tuner.mtp_state(ex, target, model)
+    finally:
+        ex.close()
+    if not mtp["allowed"]:
+        cfg = tuner.strip_mtp(cfg)
+    return {"ok": True, "args": tuner.cfg_to_args(cfg), "source": d.get("source", "default"),
+            "score": d.get("score", 0), "mtp": mtp}
 
 
 @router.get("/status/{job_id}")

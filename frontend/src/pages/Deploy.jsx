@@ -1,13 +1,39 @@
 import { useState, useEffect, useRef } from 'react'
 import { IconRefresh, IconPlay, IconStop, IconRocket } from '../components/Icons'
 import LongVideoDeploy from './LongVideoDeploy'
+import Tune from './Tune'
+import { readLastModel, writeLastModel } from '../lib/lastModel'
 import { useI18n } from '../i18n/I18nContext'
 
 export default function Deploy({ targetId, target }) {
   const { t } = useI18n()
   const isVideo = target?.engine_type === 'comfyui'
   const [videoMode, setVideoMode] = useState('short') // short | long
-  if (!isVideo) return <TextDeploy targetId={targetId} target={target} />
+  const [step, setStep] = useState('deploy') // deploy | tune
+  // [2026-10-01 v1.1.11] Deploy e Tuning sono due passaggi in sequenza nella stessa pagina (schede 1 -> 2).
+  // Il modello scelto e' condiviso (lib/lastModel). Il tuning e' disponibile solo per llama.cpp.
+  // Versione precedente: if (!isVideo) return <TextDeploy targetId={targetId} target={target} />
+  if (!isVideo) {
+    const canTune = (target?.engine_type || 'llama_cpp') === 'llama_cpp'
+    return (
+      <div>
+        {canTune && (
+          <div className="inline-flex gap-1 p-1 rounded-lg bg-card border border-gray/30 mb-6">
+            {[['deploy', `1 · ${t('deploy.stepDeploy')}`], ['tune', `2 · ${t('deploy.stepTune')}`]].map(([k, label]) => (
+              <button key={k} onClick={() => setStep(k)}
+                className={`px-4 py-1.5 rounded-md text-sm transition ${
+                  step === k ? 'bg-blue text-bg font-semibold' : 'text-gray hover:text-fg'}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        {step === 'tune' && canTune
+          ? <Tune targetId={targetId} embedded />
+          : <TextDeploy targetId={targetId} target={target} />}
+      </div>
+    )
+  }
   return (
     <div>
       <div className="inline-flex gap-1 p-1 rounded-lg bg-card border border-gray/30 mb-6">
@@ -26,23 +52,7 @@ export default function Deploy({ targetId, target }) {
   )
 }
 
-/* Ricorda l'ultimo modello selezionato su ogni macchina target: alla riapertura della pagina lo ripristina, invece di cadere ogni volta sul primo della lista */
-const LAST_MODEL_KEY = 'readyllm:lastModel'
-
-function readLastModel(targetId) {
-  try {
-    const m = JSON.parse(localStorage.getItem(LAST_MODEL_KEY) || '{}')
-    return m[targetId] || ''
-  } catch { return '' }
-}
-
-function writeLastModel(targetId, model) {
-  try {
-    const m = JSON.parse(localStorage.getItem(LAST_MODEL_KEY) || '{}')
-    m[targetId] = model
-    localStorage.setItem(LAST_MODEL_KEY, JSON.stringify(m))
-  } catch { /* errori di scrittura (es. modalita' privata) ignorabili */ }
-}
+/* [2026-10-01 v1.1.11] readLastModel / writeLastModel spostate in ../lib/lastModel.js (condivise con il Tuning) */
 
 /* ==================== Deploy dei modelli testuali (llama.cpp / vLLM) ==================== */
 

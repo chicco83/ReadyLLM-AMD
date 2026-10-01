@@ -1,7 +1,6 @@
 import { useWebSocket } from '../hooks/useWebSocket'
 import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart, BarChart, Bar, Legend } from 'recharts'
 import { useState, useEffect } from 'react'
-import Tune from './Tune'
 import { useI18n } from '../i18n/I18nContext'
 
 const MAX_POINTS = 60
@@ -207,11 +206,7 @@ export default function Monitor({ targetId }) {
         </ResponsiveContainer>
       </div>
 
-      {/* [2026-10-01 v1.1.9] Tuning intelligente (automatico + AI) unito al monitoraggio: i due strumenti sono correlati,
-          cosi' si osservano GPU/velocita' in tempo reale mentre si esegue il tuning, senza cambiare pagina. */}
-      <div className="mt-8 border-t border-gray/30 pt-6">
-        <Tune targetId={targetId} embedded />
-      </div>
+      {/* [2026-10-01 v1.1.11] Il tuning e' ora il passo 2 della pagina Deploy (v1.1.9 lo aveva inserito qui) */}
     </div>
   )
 }

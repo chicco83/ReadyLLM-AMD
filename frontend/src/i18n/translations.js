@@ -5,8 +5,8 @@
 export const translations = {
   en: {
     // ===== Navigazione / marchio / globale =====
-    // [2026-10-01 v1.1.9] etichetta aggiornata (era: 'nav.monitor': 'Real-time Monitor')
-    'nav.monitor': 'Monitor & Tuning',
+    // [2026-10-01 v1.1.11] ripristinata (v1.1.9 la aveva cambiata in 'Monitor & Tuning': il tuning e' ora nella pagina Deploy)
+    'nav.monitor': 'Real-time Monitor',
     'nav.store': 'Model Store',
     'nav.deploy': 'Deploy',
     'nav.tune': 'Smart Tuning',
@@ -287,6 +287,15 @@ export const translations = {
     'settings.testConn': 'Test Connection',
     'settings.testing': 'Testing...',
     'settings.save': 'Save',
+    'deploy.stepDeploy': 'Deploy',
+    'deploy.stepTune': 'Tuning',
+    'tune.baselineLabel': 'Baseline (the config you compare against)',
+    'tune.baselineMode.deploy': 'Deploy parameters',
+    'tune.baselineMode.engine': 'Engine defaults',
+    'tune.baselineMode.none': 'No baseline',
+    'tune.baselineEmpty': 'Deploy parameters for this model (editable)',
+    'tune.mtpOff': 'MTP speculative decoding (draft-mtp) is not supported by this model or this llama-server build: it will not be proposed.',
+    'tune.stopsServer': 'Tuning starts and stops llama-server several times: a model running from Deploy will be stopped.',
     'settings.browse': 'Browse…',
     'settings.pickEngine': 'Select the llama-server executable',
     'settings.pickModels': 'Select the models folder',
@@ -335,8 +344,8 @@ export const translations = {
 
   // [v1.1.0 2026-10-01] Italiano: traduzione completa delle chiavi inglesi (senza chiavi duplicate)
   it: {
-    // [2026-10-01 v1.1.9] etichetta aggiornata (era: 'nav.monitor': 'Monitoraggio in tempo reale')
-    'nav.monitor': 'Monitoraggio e tuning',
+    // [2026-10-01 v1.1.11] ripristinata (v1.1.9 la aveva cambiata in 'Monitoraggio e tuning')
+    'nav.monitor': 'Monitoraggio in tempo reale',
     'nav.store': 'Negozio modelli',
     'nav.deploy': 'Deploy',
     'nav.tune': 'Tuning intelligente',
@@ -570,6 +579,15 @@ export const translations = {
     'settings.testConn': 'Verifica la connessione',
     'settings.testing': 'Verifica in corso...',
     'settings.save': 'Salva',
+    'deploy.stepDeploy': 'Deploy',
+    'deploy.stepTune': 'Tuning',
+    'tune.baselineLabel': 'Baseline (la configurazione di confronto)',
+    'tune.baselineMode.deploy': 'Parametri del Deploy',
+    'tune.baselineMode.engine': 'Predefiniti del motore',
+    'tune.baselineMode.none': 'Nessuna baseline',
+    'tune.baselineEmpty': 'Parametri del Deploy per questo modello (modificabili)',
+    'tune.mtpOff': 'La decodifica speculativa MTP (draft-mtp) non è supportata da questo modello o da questa build di llama-server: non verrà proposta.',
+    'tune.stopsServer': 'Il tuning avvia e ferma più volte llama-server: un modello in esecuzione dal Deploy verrà fermato.',
     'settings.browse': 'Sfoglia…',
     'settings.pickEngine': 'Seleziona l\'eseguibile llama-server',
     'settings.pickModels': 'Seleziona la cartella dei modelli',
@@ -616,8 +634,8 @@ export const translations = {
   },
   zh: {
     // ===== Navigazione / marchio / globale =====
-    // [2026-10-01 v1.1.9] etichetta aggiornata (era: '实时监控')
-    'nav.monitor': '监控与调优',
+    // [2026-10-01 v1.1.11] ripristinata
+    'nav.monitor': '实时监控',
     'nav.store': '模型商店',
     'nav.deploy': '部署',
     'nav.tune': '智能调优',
@@ -898,6 +916,15 @@ export const translations = {
     'settings.testConn': '测试连接',
     'settings.testing': '测试中...',
     'settings.save': '保存',
+    'deploy.stepDeploy': '部署',
+    'deploy.stepTune': '调优',
+    'tune.baselineLabel': '基线（对比用的配置）',
+    'tune.baselineMode.deploy': '部署参数',
+    'tune.baselineMode.engine': '引擎默认',
+    'tune.baselineMode.none': '无基线',
+    'tune.baselineEmpty': '该模型的部署参数（可编辑）',
+    'tune.mtpOff': '该模型或此 llama-server 构建不支持 MTP 推测解码（draft-mtp），将不会使用。',
+    'tune.stopsServer': '调优会多次启动和停止 llama-server：从部署页运行的模型将被停止。',
     'settings.browse': '浏览…',
     'settings.pickEngine': '选择 llama-server 可执行文件',
     'settings.pickModels': '选择模型文件夹',

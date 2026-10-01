@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import ProgressPanel from '../components/ProgressPanel'
 import { IconAlert, IconStar, IconCheck, IconX, IconBot } from '../components/Icons'
 import { useI18n } from '../i18n/I18nContext'
+import { readLastModel, writeLastModel } from '../lib/lastModel'
 
 // ==================== Tuning automatico ====================
 
@@ -43,15 +44,8 @@ function CtxPicker({ value, onChange }) {
   )
 }
 
-const DEFAULT_BASELINE = {
-  'spec-type': 'draft-mtp',
-  'cache-type-k': 'q4_0',
-  'cache-type-v': 'q4_0',
-  'n-gpu-layers': 'all',
-  'batch-size': '4096',
-  'ubatch-size': '1024',
-  'spec-draft-n-max': '3',
-}
+// [2026-10-01 v1.1.11] DEFAULT_BASELINE (draft-mtp / q4_0 / batch 4096, fisso) rimosso: la baseline ora e' la riga di parametri
+// del Deploy per il modello selezionato (GET /api/tune/baseline), modificabile nel pannello.
 
 function AutoTune({ targetId }) {
   const { t } = useI18n()
@@ -59,7 +53,11 @@ function AutoTune({ targetId }) {
   const [selected, setSelected] = useState('')
   const [goal, setGoal] = useState('latency')
   const [ctxSize, setCtxSize] = useState(8192)
-  const [useBaseline, setUseBaseline] = useState(true)
+  // [2026-10-01 v1.1.11] baseline: 'deploy' = parametri del Deploy (modificabili), 'engine' = predefiniti del motore, 'none' = nessuna
+  // Versione precedente: const [useBaseline, setUseBaseline] = useState(true)
+  const [baselineMode, setBaselineMode] = useState('deploy')
+  const [baselineArgs, setBaselineArgs] = useState('')
+  const [baselineInfo, setBaselineInfo] = useState(null) // {source, mtp:{model,build,allowed}}
   const [state, setState] = useState('idle')
   const [logs, setLogs] = useState([])
   const [results, setResults] = useState([])
@@ -92,12 +90,16 @@ function AutoTune({ targetId }) {
     if (!targetId) return
     setState('idle'); setResults([]); setLogs([]); setError('')
     setBest(null); setBaseline(null)
-    fetch(`/api/store/downloaded?target_id=${targetId}`)
+    // [2026-10-01 v1.1.11] elenco da /api/deploy/models (percorsi relativi, anche sottocartelle) come nel Deploy;
+    // prima /api/store/downloaded restituiva solo il nome file e i modelli nelle sottocartelle non si avviavano.
+    fetch(`/api/deploy/models?target_id=${targetId}`)
       .then(r => r.json())
       .then(d => {
-        const list = (d.models || []).map(m => m.filename)
+        const list = d.models || []
         setModels(list)
-        setSelected(list[0] || '')
+        // Il modello scelto nel Deploy compare da solo qui (lib/lastModel)
+        const last = readLastModel(targetId)
+        setSelected(list.includes(last) ? last : (list[0] || ''))
       })
     // Dopo refresh/rientro nella pagina ripristina il task di tuning in esecuzione
     fetch(`/api/tune/active?target_id=${targetId}`)
@@ -117,6 +119,18 @@ function AutoTune({ targetId }) {
     return () => clearInterval(pollRef.current)
   }, [targetId])
 
+  // Carica la baseline proposta (parametri del Deploy senza MTP non supportato) ogni volta che cambia il modello
+  useEffect(() => {
+    if (!targetId || !selected) return
+    setBaselineInfo(null)
+    fetch(`/api/tune/baseline?target_id=${targetId}&model=${encodeURIComponent(selected)}`)
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) { setBaselineArgs(d.args || ''); setBaselineInfo({ source: d.source, mtp: d.mtp }) }
+      })
+      .catch(() => {})
+  }, [targetId, selected])
+
   async function start() {
     setState('running')
     setLogs([]); setResults([]); setError(''); setBest(null); setBaseline(null)
@@ -128,7 +142,8 @@ function AutoTune({ targetId }) {
         model: selected,
         ctx_size: ctxSize,
         goal,
-        baseline_cfg: useBaseline ? DEFAULT_BASELINE : null,
+        // Versione precedente: baseline_cfg: useBaseline ? DEFAULT_BASELINE : null,
+        baseline_args: baselineMode === 'deploy' ? baselineArgs : (baselineMode === 'engine' ? '' : null),
       }),
     })
     const d = await res.json()
@@ -175,7 +190,7 @@ function AutoTune({ targetId }) {
         </p>
 
         <label className="block text-gray text-sm mb-2">{t('tune.selectModel')}</label>
-        <select value={selected} onChange={e => setSelected(e.target.value)}
+        <select value={selected} onChange={e => { setSelected(e.target.value); writeLastModel(targetId, e.target.value) }}
           className="w-full bg-bg border border-gray/40 rounded-lg px-3 py-2 mb-4 text-fg">
           {models.length === 0 && <option value="">{t('tune.emptyDir')}</option>}
           {models.map(m => <option key={m} value={m}>{m}</option>)}
@@ -195,10 +210,36 @@ function AutoTune({ targetId }) {
           ))}
         </div>
 
-        <label className="flex items-center gap-2 text-sm text-gray mb-6 cursor-pointer">
-          <input type="checkbox" checked={useBaseline} onChange={e => setUseBaseline(e.target.checked)} className="accent-green" />
-          {t('tune.baseline')}
-        </label>
+        {/* [2026-10-01 v1.1.11] Baseline: parametri del Deploy (modificabili) / predefiniti del motore / nessuna */}
+        <label className="block text-gray text-sm mb-2">{t('tune.baselineLabel')}</label>
+        <div className="flex gap-4 text-sm text-gray mb-2">
+          {[['deploy', t('tune.baselineMode.deploy')], ['engine', t('tune.baselineMode.engine')], ['none', t('tune.baselineMode.none')]].map(([k, label]) => (
+            <label key={k} className="flex items-center gap-1.5 cursor-pointer">
+              <input type="radio" name="baseline-mode" checked={baselineMode === k}
+                onChange={() => setBaselineMode(k)} className="accent-green" />
+              {label}
+            </label>
+          ))}
+        </div>
+        {baselineMode === 'deploy' && (
+          <div className="mb-4">
+            <textarea value={baselineArgs} onChange={e => setBaselineArgs(e.target.value)} rows={3}
+              placeholder={t('tune.baselineEmpty')}
+              className="w-full bg-bg border border-gray/40 rounded-lg px-3 py-2 text-fg font-mono text-xs" />
+            {baselineInfo && (
+              <div className="text-xs text-gray mt-1">
+                {t('deploy.sourceLabel')} {t(`deploy.source.${baselineInfo.source}`) === `deploy.source.${baselineInfo.source}` ? baselineInfo.source : t(`deploy.source.${baselineInfo.source}`)}
+              </div>
+            )}
+          </div>
+        )}
+        {baselineInfo && !baselineInfo.mtp?.allowed && (
+          <div className="mb-4 text-xs text-yellow inline-flex items-start gap-1.5">
+            <IconAlert size={13} />
+            <span>{t('tune.mtpOff')}</span>
+          </div>
+        )}
+        <div className="mb-6" />
 
         <button onClick={start} disabled={state === 'running' || !selected}
           className="w-full bg-green text-bg font-bold py-2.5 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition">
@@ -342,12 +383,15 @@ function AITune({ targetId }) {
     // Recupera in parallelo elenco modelli e stato di esecuzione: se un modello e' in esecuzione (status.model),
     // lo seleziona in modo fisso, dopo un refresh della pagina non torna piu' al default.
     Promise.all([
-      fetch(`/api/store/downloaded?target_id=${targetId}`).then(r => r.json()),
+      fetch(`/api/deploy/models?target_id=${targetId}`).then(r => r.json()),
       fetch(`/api/deploy/status?target_id=${targetId}`).then(r => r.json()),
     ]).then(([d, st]) => {
-      const list = (d.models || []).map(m => m.filename)
+      const list = d.models || []
       setModels(list)
-      if (st.running && st.model && list.includes(st.model)) {
+      const last = readLastModel(targetId)
+      if (list.includes(last)) {
+        setSelected(last)
+      } else if (st.running && st.model && list.includes(st.model)) {
         setSelected(st.model)
       } else {
         setSelected(list[0] || '')
@@ -472,7 +516,7 @@ function AITune({ targetId }) {
       {/* Parametri di tuning */}
       <div className="bg-card rounded-xl p-6 border border-gray/30">
         <label className="block text-gray text-sm mb-2">{t('tune.selectModel')}</label>
-        <select value={selected} onChange={e => setSelected(e.target.value)}
+        <select value={selected} onChange={e => { setSelected(e.target.value); writeLastModel(targetId, e.target.value) }}
           className="w-full bg-bg border border-gray/40 rounded-lg px-3 py-2 mb-4 text-fg">
           {models.length === 0 && <option value="">{t('tune.emptyDir')}</option>}
           {models.map(m => <option key={m} value={m}>{m}</option>)}
@@ -585,6 +629,8 @@ export default function Tune({ targetId, embedded = false }) {
           {t('tune.ai')}
         </button>
       </div>
+
+      <p className="text-xs text-gray -mt-2 mb-4">{t('tune.stopsServer')}</p>
 
       {tab === 'auto' ? <AutoTune targetId={targetId} /> : <AITune targetId={targetId} />}
     </div>

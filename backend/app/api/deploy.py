@@ -503,6 +503,31 @@ def _model_size_gb(executor, target, model: str) -> float:
 
 @router.get("/default-args")
 def default_args(target_id: str, model: str):
+    """[2026-10-01 v1.1.11] Come _default_args_raw, ma toglie i parametri MTP (spec-type, spec-draft-*) se il modello o la
+    build di llama-server non li supportano (altrimenti l'avvio dal Deploy poteva fallire con parametri non validi)."""
+    res = _default_args_raw(target_id, model)
+    target = get_target(target_id)
+    if target and (getattr(target, "engine_type", "llama_cpp") or "llama_cpp") == "llama_cpp" and res.get("args") \
+            and ("spec-" in res["args"] or "draft" in res["args"]) and target.engine_path:
+        from ..services import tuner
+        ex = make_executor(target)
+        try:
+            st = tuner.mtp_state(ex, target, model)
+        finally:
+            ex.close()
+        if not st["allowed"]:
+            toks, out, i = res["args"].split(), [], 0
+            while i < len(toks):
+                if toks[i].startswith("--") and tuner.is_spec_key(toks[i][2:]):
+                    i += 2
+                    continue
+                out.append(toks[i]); i += 1
+            res["args"] = " ".join(out)
+            res.setdefault("reasoning", []).append("MTP non supportato da modello/build: parametri di decodifica speculativa rimossi")
+    return res
+
+
+def _default_args_raw(target_id: str, model: str):
     """Restituisce i parametri di deploy di default: priorita' al risultato di tuning piu' recente, altrimenti li calcola col generatore deterministico.
 
     Restituisce una stringa di riga di comando direttamente modificabile, per precompilare il riquadro parametri del frontend.
