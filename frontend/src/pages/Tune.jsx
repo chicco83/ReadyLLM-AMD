@@ -1,12 +1,15 @@
 import { useState, useEffect, useRef } from 'react'
 import ProgressPanel from '../components/ProgressPanel'
+import BeforeAfter from '../components/BeforeAfter'
 import { IconAlert, IconStar, IconCheck, IconX, IconBot } from '../components/Icons'
 import { useI18n } from '../i18n/I18nContext'
 import { readLastModel, writeLastModel } from '../lib/lastModel'
 
 // ==================== Tuning automatico ====================
 
+// [2026-10-02 v1.1.27] aggiunto 'coding' (contesti lunghi + codice generato); descrizioni con il caso d'uso
 const GOALS = [
+  'coding',
   'latency',
   'throughput',
   'prefill',
@@ -51,7 +54,7 @@ function AutoTune({ targetId }) {
   const { t } = useI18n()
   const [models, setModels] = useState([])
   const [selected, setSelected] = useState('')
-  const [goal, setGoal] = useState('latency')
+  const [goal, setGoal] = useState('coding')
   const [ctxSize, setCtxSize] = useState(8192)
   // [2026-10-01 v1.1.11] baseline: 'deploy' = parametri del Deploy (modificabili), 'engine' = predefiniti del motore, 'none' = nessuna
   // Versione precedente: const [useBaseline, setUseBaseline] = useState(true)
@@ -66,6 +69,10 @@ function AutoTune({ targetId }) {
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  // [2026-10-02 v1.1.27] prova di altri motori (Vulkan <-> ROCm) e esito di «Salva e applica»
+  const [altBuilds, setAltBuilds] = useState(0)
+  const [tryEngines, setTryEngines] = useState(true)
+  const [applyMsg, setApplyMsg] = useState('')
   const pollRef = useRef(null)
 
   function resumePoll(jobId) {
@@ -135,6 +142,14 @@ function AutoTune({ targetId }) {
     return () => clearInterval(pollRef.current)
   }, [targetId])
 
+  // numero di build GPU installate (rocm/vulkan/cuda): se >1 compare l'opzione «prova anche gli altri motori»
+  useEffect(() => {
+    if (!targetId) return
+    fetch(`/api/target/${targetId}/engines-installed`).then(r => r.json())
+      .then(d => setAltBuilds((d.builds || []).filter(b => /rocm|vulkan|cuda/i.test(b.backend || '')).length))
+      .catch(() => {})
+  }, [targetId])
+
   // Carica la baseline proposta (parametri del Deploy senza MTP non supportato) ogni volta che cambia il modello
   useEffect(() => {
     if (!targetId || !selected) return
@@ -149,7 +164,7 @@ function AutoTune({ targetId }) {
 
   async function start() {
     setState('running')
-    setLogs([]); setResults([]); setError(''); setBest(null); setBaseline(null)
+    setLogs([]); setResults([]); setError(''); setBest(null); setBaseline(null); setApplyMsg(''); setSaved(false)
     const res = await fetch('/api/tune/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -160,6 +175,7 @@ function AutoTune({ targetId }) {
         goal,
         // Versione precedente: baseline_cfg: useBaseline ? DEFAULT_BASELINE : null,
         baseline_args: baselineMode === 'deploy' ? baselineArgs : (baselineMode === 'engine' ? '' : null),
+        try_engines: tryEngines && altBuilds > 1,
       }),
     })
     const d = await res.json()
@@ -167,11 +183,13 @@ function AutoTune({ targetId }) {
     resumePoll(d.job_id)
   }
 
+  // [2026-10-02 v1.1.27] «Salva e applica» ora SALVA, cambia motore se consigliato e RIAVVIA il modello con la configurazione
+  // consigliata (il tuning lascia il server fermo). Versione precedente: POST /api/tune/save (solo salvataggio, motore spento).
   async function saveBest() {
     if (!best?.config) return
-    setSaving(true)
+    setSaving(true); setApplyMsg('')
     try {
-      const res = await fetch('/api/tune/save', {
+      const res = await fetch('/api/tune/apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -179,13 +197,18 @@ function AutoTune({ targetId }) {
           model: selected,
           ctx_size: ctxSize,
           params: best.config,
-          // [2026-10-02 v1.1.26] t/s di decodifica (il Deploy li mostra come «misurati t/s»); prima: score: best.score || 0 (punteggio composito)
+          // t/s di decodifica (il Deploy li mostra come «misurati t/s»)
           score: best.metrics?.decode || 0,
+          engine_path: best.engine?.path || null,
+          engine_backend: best.engine?.backend || null,
+          restart: true,
         }),
       })
       const d = await res.json()
-      if (d.ok) setSaved(true)
-      else setError(d.message || t('tune.saveFail'))
+      if (d.ok) {
+        setSaved(true)
+        setApplyMsg(t(d.started ? 'tune.appliedStarted' : 'tune.appliedSaved') + (d.switched ? ` — ${t('tune.engineChanged')}: ${d.switched}` : ''))
+      } else setError(d.message || t('tune.saveFail'))
     } catch (e) {
       setError(t('tune.saveReqFail'))
     } finally {
@@ -217,7 +240,7 @@ function AutoTune({ targetId }) {
         <CtxPicker value={ctxSize} onChange={setCtxSize} />
 
         <label className="block text-gray text-sm mb-2">{t('tune.goalLabel')}</label>
-        <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="grid grid-cols-2 gap-3 mb-4">
           {GOALS.map(v => (
             <button key={v} onClick={() => setGoal(v)}
               className={`p-3 rounded-lg border text-left transition ${goal === v ? 'border-blue bg-blue/20' : 'border-gray/40 hover:bg-gray/10'}`}>
@@ -258,6 +281,14 @@ function AutoTune({ targetId }) {
         )}
         <div className="mb-6" />
 
+        {/* [2026-10-02 v1.1.27] chiarimento: il tuning prende il controllo del server */}
+        <div className="mb-3 text-xs text-yellow bg-yellow/10 border border-yellow/30 rounded-lg p-3">{t('tune.takeover')}</div>
+        {altBuilds > 1 && (
+          <label className="flex items-start gap-2 mb-3 text-sm cursor-pointer">
+            <input type="checkbox" className="mt-1" checked={tryEngines} onChange={e => setTryEngines(e.target.checked)} />
+            <span><b>{t('tune.tryEngines')}</b><span className="block text-xs text-gray">{t('tune.tryEnginesHint')}</span></span>
+          </label>
+        )}
         <button onClick={start} disabled={state === 'running' || !selected}
           className="w-full bg-green text-bg font-bold py-2.5 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition">
           {state === 'running' ? t('tune.running') : t('tune.startAuto')}
@@ -278,6 +309,7 @@ function AutoTune({ targetId }) {
           <div className="text-xs text-gray">
             {t('tune.metricsLine', { decode: best.metrics?.decode, prefill: best.metrics?.prefill, ttft: best.metrics?.ttft_ms, gpu: best.metrics?.gpu_util })}
           </div>
+          <BeforeAfter baseline={baseline} best={best} />
           {gain != null && baseline && (
             <div className={`mt-3 text-sm font-semibold ${Number(gain) >= 0 ? 'text-green' : 'text-red'}`}>
               {Number(gain) >= 0
@@ -289,7 +321,7 @@ function AutoTune({ targetId }) {
             className={`mt-4 w-full py-2 rounded-lg text-sm font-semibold transition ${saved ? 'bg-green/20 text-green cursor-default' : 'bg-green text-bg hover:opacity-90'}`}>
             {saved ? t('tune.saved') : (saving ? t('tune.saving') : t('tune.saveApply'))}
           </button>
-          {saved && <div className="mt-2 text-xs text-gray">{t('tune.savedHint', { ctx: ctxSize })}</div>}
+          {saved && <div className="mt-2 text-xs text-gray">{applyMsg || t('tune.savedHint', { ctx: ctxSize })}</div>}
         </div>
       )}
 

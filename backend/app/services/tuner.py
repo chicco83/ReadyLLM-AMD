@@ -87,11 +87,15 @@ GOAL_WEIGHTS = {
     "latency":    {"decode": 0.5, "prefill": 0.3, "ttft": 0.2},
     "throughput": {"decode": 1.0, "prefill": 0.0, "ttft": 0.0},
     "prefill":    {"decode": 0.2, "prefill": 0.8, "ttft": 0.0},
+    # [2026-10-02 v1.1.27] Coding / agenti (Claude Code, Cline, Continue...): a ogni richiesta si rileggono file e cronologia
+    # (prompt lunghi -> il prefill pesa molto) e poi si genera codice (la decodifica conta ancora); il TTFT conta poco.
+    "coding":     {"decode": 0.4, "prefill": 0.5, "ttft": 0.1},
 }
 GOAL_LABELS = {
     "latency": "Percezione end-to-end",
     "throughput": "Throughput di decodifica",
     "prefill": "Prefill di testi lunghi",
+    "coding": "Coding e agenti",   # [2026-10-02 v1.1.27]
 }
 
 
@@ -634,12 +638,55 @@ def _fine_search(executor, target, engine, model_path, ctx_size,
     return best
 
 
+def _alt_engines(executor: Executor, target: Target) -> list:
+    """[2026-10-02 v1.1.27] Altre build di llama-server installate che usano la GPU (rocm / vulkan / cuda), diverse da quella in uso.
+    Su una Radeon e' tipicamente la coppia Vulkan <-> ROCm. Le build solo CPU o di backend non riconosciuto sono escluse."""
+    from . import installer
+    cur = (target.engine_path or "").replace("/", "\\").lower()
+    out = []
+    for b in installer.find_llama_installs(executor, target):
+        be = (b.get("backend") or "").lower().rstrip("?")
+        if b["path"].replace("/", "\\").lower() == cur:
+            continue
+        if any(k in be for k in ("rocm", "vulkan", "cuda")):
+            out.append(b)
+    return out
+
+
+def _try_other_engines(executor, target, model_path, ctx_size, goal, job_id, best: dict) -> List[dict]:
+    """Rimisura la config migliore con ogni altra build GPU. Restituisce i risultati riusciti (con campo engine e label con il backend).
+    Se la build non supporta qualche parametro (es. draft-mtp) l'avvio fallisce e la build viene saltata con una nota nel log."""
+    from dataclasses import replace
+    alts = _alt_engines(executor, target)
+    if not alts:
+        _append_log(job_id, "[Motori] nessun'altra build GPU installata da confrontare")
+        return []
+    _append_log(job_id, f"[Motori] confronto con {len(alts)} altra/e build: " + ", ".join(a.get("backend", "?") for a in alts))
+    with _LOCK:
+        _done = _JOBS.get(job_id, {}).get("progress", {}).get("done", 0)
+    _set_progress(job_id, total=_done + len(alts))
+    out = []
+    for a in alts:
+        alt_target = replace(target, engine_path=a["path"])
+        eng = LlamaCppAdapter(executor, alt_target)
+        r = _run_one(executor, alt_target, eng, model_path, best["config"], ctx_size, job_id, f"motore {a.get('backend', '?')}")
+        if not r:
+            _append_log(job_id, f"  [motore {a.get('backend', '?')}] non utilizzabile con questa configurazione: saltato")
+            continue
+        r["score"] = _score(r["metrics"], goal)
+        r["engine"] = {"backend": a.get("backend", ""), "version": a.get("version", ""), "path": a["path"]}
+        r["label"] = f"{r['label']} @ {a.get('backend', '?')}"
+        out.append(r)
+    return out
+
+
 # ==================== Flusso principale ====================
 
 def start_tune(target_id: str, model: str, ctx_size: int = 8192,
                goal: str = "latency", baseline_cfg: Optional[dict] = None,
-               model_size_gb: float = 0.0) -> dict:
+               model_size_gb: float = 0.0, try_engines: bool = False) -> dict:
     """Avvia il task di tuning in due fasi.
+    [2026-10-02 v1.1.27] try_engines: alla fine rimisura la configurazione migliore con le altre build GPU installate (es. ROCm vs Vulkan).
     baseline_cfg: parametri originali dell'utente (dict), misurati per primi come gruppo di confronto di baseline.
     [2026-10-01 v1.1.11] None = nessuna baseline; {} = baseline con i parametri predefiniti del motore.
     model_size_gb: dimensione del modello, per la pre-verifica della VRAM; se omessa vale 0 e la pre-verifica viene saltata.
@@ -663,7 +710,7 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
             "ctx_size": ctx_size, "goal": goal,
             "status": "running", "logs": [], "results": [],
             "baseline": None, "best": None, "error": "",
-            "ts_start": time.time(), "meta": {"target_name": target.name, "os": target.os},   # v1.1.24: per lo storico
+            "ts_start": time.time(), "meta": {"target_name": target.name, "os": target.os, "try_engines": try_engines},   # v1.1.24: per lo storico
         }
 
     def _worker():
@@ -761,6 +808,18 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
             if base_r and final_best is not base_r and final_best["score"] < base_r["score"] * NOISE:
                 final_best = base_r
                 _append_log(job_id, "  Nessuna variante supera la tua configurazione attuale oltre il margine di rumore (3%): resta consigliata quella.")
+            # [2026-10-02 v1.1.27] Prova degli altri motori (Vulkan <-> ROCm...): tutte le misure fatte finora sono del motore in uso
+            cur_eng = _JOBS[job_id].get("meta", {}).get("engine", {})
+            for r_ in all_results:
+                r_.setdefault("engine", cur_eng)
+            if try_engines:
+                alt_res = _try_other_engines(executor, target, model_path, ctx_size, goal, job_id, final_best)
+                all_results.extend(alt_res)
+                for r_ in alt_res:
+                    # un altro motore sostituisce la scelta solo se supera la migliore di almeno il 3% (margine di rumore)
+                    if r_["score"] > final_best["score"] * NOISE:
+                        final_best = r_
+                        _append_log(job_id, f"  ✓ Il motore {r_['engine']['backend']} e' piu' veloce: consigliato il cambio di motore")
             _finalize(job_id, all_results, final_best)
         except Exception as e:
             _fail(job_id, str(e))

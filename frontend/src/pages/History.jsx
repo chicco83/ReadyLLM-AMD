@@ -94,8 +94,11 @@ export default function History({ targetId }) {
                     <td className="px-3 py-2 max-w-[22rem] truncate" title={e.model}>{e.model.split(/[\\/]/).pop()}
                       {e.model_size_gb ? <span className="text-gray text-xs ml-1">{e.model_size_gb} GB</span> : null}</td>
                     <td className="px-3 py-2">
-                      <span className="px-2 py-0.5 rounded bg-purple/15 text-purple text-xs font-semibold uppercase">{e.engine?.backend || e.engine?.type || '?'}</span>
-                      <div className="text-xs text-gray max-w-[16rem] truncate" title={e.engine?.version}>{e.engine?.version}</div>
+                      {/* [2026-10-02 v1.1.27] motore della configurazione consigliata (puo' differire da quello di partenza) */}
+                      <span className="px-2 py-0.5 rounded bg-purple/15 text-purple text-xs font-semibold uppercase">{e.best?.engine?.backend || e.engine?.backend || e.engine?.type || '?'}</span>
+                      {e.best?.engine?.backend && e.engine?.backend && e.best.engine.backend !== e.engine.backend &&
+                        <span className="ml-1 text-[11px] text-yellow">← {e.engine.backend}</span>}
+                      <div className="text-xs text-gray max-w-[16rem] truncate" title={e.best?.engine?.version || e.engine?.version}>{e.best?.engine?.version || e.engine?.version}</div>
                     </td>
                     <td className="px-3 py-2 text-xs max-w-[12rem] truncate" title={e.gpu?.name}>{e.gpu?.name || '--'}</td>
                     {ko

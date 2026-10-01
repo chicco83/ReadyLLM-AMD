@@ -45,7 +45,8 @@ def _slim(r: Optional[dict]) -> Optional[dict]:
     if not r:
         return None
     return {"label": r.get("label", ""), "config": r.get("config", {}),
-            "metrics": r.get("metrics", {}), "score": r.get("score", 0)}
+            "metrics": r.get("metrics", {}), "score": r.get("score", 0),
+            "engine": r.get("engine", {})}    # [2026-10-02 v1.1.27] motore con cui e' stata ottenuta la misura
 
 
 def add_entry(job: dict) -> None:

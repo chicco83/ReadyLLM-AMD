@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useI18n } from '../i18n/I18nContext'
+import BeforeAfter from './BeforeAfter'
 
 // [2026-10-01 v1.1.19] Barra di progresso del tuning sempre visibile nella pagina Monitoraggio (qualunque passaggio sia aperto:
 // Deploy o Tuning). Interroga GET /api/tune/active ogni 2 s: fase, prove completate/totale stimato, motore al centro (v1.1.22)
@@ -83,6 +84,8 @@ export default function TuneLiveProgress({ targetId }) {
             : <span className="text-green">{shown.best?.label} · {shown.best?.metrics?.decode} t/s</span>}
         </div>
       )}
+      {/* [2026-10-02 v1.1.27] a fine tuning: grafico prima vs dopo, a colpo d'occhio */}
+      {done && !failed && <BeforeAfter baseline={shown.baseline} best={shown.best} />}
       {showLog && (
         <div className="mt-3 bg-bg rounded-lg p-3 font-mono text-xs text-fg/80 space-y-0.5 max-h-40 overflow-auto">
           {logs.map((l, i) => (
