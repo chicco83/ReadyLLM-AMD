@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Avvio di backend (FastAPI) e frontend (Vite) di ReadyLLM-AMD
 
-Versione: 1.1.5 — 2026-10-01 22:40
+Versione: 1.1.6 — 2026-10-01 22:55
 
 Uso (dalla radice del progetto, Windows / Linux / macOS):
     python avvia.py              # avvia backend + frontend
     python avvia.py --installa   # prima installa le dipendenze (pip install -r + npm install), poi avvia
+    python avvia.py --diagnosi-gpu  # mostra l'output grezzo del rilevamento GPU/VRAM (per segnalare problemi)
     python avvia.py --comandi    # stampa soltanto i comandi manuali, senza avviare nulla
     python avvia.py --backend    # solo backend
     python avvia.py --frontend   # solo frontend
@@ -80,8 +81,31 @@ def stampa_comandi():
     print(f"  cd {FRONTEND}\n  npm install\n  npm run dev      # http://localhost:3000")
 
 
+def diagnosi_gpu():
+    """[v1.1.6] Esegue il rilevamento hardware locale e stampa i risultati + l'output grezzo delle fonti Windows."""
+    sys.path.insert(0, BACKEND)
+    from app.models.target import Target
+    from app.services.executor import LocalExecutor
+    from app.services import collectors as c
+    t = Target(os="windows" if os.name == "nt" else "linux")
+    ex = LocalExecutor()
+    print("GPU rilevata:", c._detect_gpu_static(ex, t))
+    if os.name == "nt":
+        cmd = c._ps(
+            "Get-ItemProperty 'HKLM:\\SYSTEM\\ControlSet001\\Control\\Class\\{4d36e968-e325-11cd-bfc1-08002be10318}\\0*' "
+            "-ErrorAction SilentlyContinue | ForEach-Object { 'CLASS=' + $_.DriverDesc + '|' + $_.'HardwareInformation.qwMemorySize' }; "
+            "Get-ChildItem 'HKLM:\\SOFTWARE\\Microsoft\\DirectX' -ErrorAction SilentlyContinue | ForEach-Object { "
+            "$p=Get-ItemProperty $_.PSPath; if ($p.Description) { 'DX=' + $p.Description + '|' + $p.DedicatedVideoMemory } }; "
+            "Get-CimInstance Win32_VideoController | ForEach-Object { 'VC=' + $_.Name + '|' + $_.AdapterRAM }")
+        r = ex.run(cmd, timeout=40)
+        print("--- output grezzo ---\n" + (r.stdout or "") + "\n" + (r.stderr or ""))
+
+
 def main():
     args = set(sys.argv[1:])
+    if "--diagnosi-gpu" in args:
+        diagnosi_gpu()
+        return
     if "--comandi" in args:
         stampa_comandi()
         return

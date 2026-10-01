@@ -86,6 +86,12 @@ def _detect_gpu_windows(executor: Executor) -> dict:
         "$c='HKLM:\\SYSTEM\\ControlSet001\\Control\\Class\\{4d36e968-e325-11cd-bfc1-08002be10318}\\0*'; "
         "Get-ItemProperty $c -ErrorAction SilentlyContinue | ForEach-Object { "
         "Write-Output ('GPU=' + $_.DriverDesc + '|' + $_.'HardwareInformation.qwMemorySize' + '|' + $_.DriverVersion) }; "
+        # [2026-10-01 v1.1.6] Seconda fonte a 64 bit: HKLM\\SOFTWARE\\Microsoft\\DirectX\\<guid> (Description +
+        # DedicatedVideoMemory), scritta da Windows per ogni adattatore. Serve quando la chiave della classe display
+        # non espone qwMemorySize: senza, restava solo Win32_VideoController.AdapterRAM (uint32, max 4 GB).
+        "Get-ChildItem 'HKLM:\\SOFTWARE\\Microsoft\\DirectX' -ErrorAction SilentlyContinue | ForEach-Object { "
+        "$p=Get-ItemProperty $_.PSPath; if ($p.Description) { "
+        "Write-Output ('GPU=' + $p.Description + '|' + $p.DedicatedVideoMemory + '|' + $p.DriverVersion) } }; "
         "Get-CimInstance Win32_VideoController | ForEach-Object { "
         "Write-Output ('VC=' + $_.Name + '|' + $_.AdapterRAM + '|' + $_.DriverVersion) }"
     )
