@@ -1,8 +1,14 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.22** — 2026-10-02 00:20
+Versione corrente: **1.1.23** — 2026-10-02 00:50
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 25. v1.1.23 — 2026-10-02 00:50 — Esito del tuning, grafico token, temperatura, cache hit
+- A fine tuning la barra di progresso resta (verde/rossa) con esito, configurazione consigliata, «Vedi risultati» e chiusura con X; il passaggio scelto (Deploy/Tuning) e' ricordato e Tuning ripristina l'ultimo risultato (`GET /api/tune/last`) invece di tornare vuoto.
+- Grafico token per giorno: asse destro dedicato all'output (prima invisibile accanto ai token prompt, molto piu' numerosi).
+- Temperatura GPU: script piu' compatto e motivo del fallimento scritto nella console del backend (`Temperatura GPU non disponibile: ...`).
+- Cache hit: se la build non usa il nome standard della metrica dei token in cache se ne cerca una equivalente. Con lo scheduling a 4 slot a rotazione del benchmark il riuso del prefisso e' realmente 0.
 
 ## 24. v1.1.22 — 2026-10-02 00:20 — Motore nella barra di progresso
 - Al centro della barra di progresso del tuning compaiono backend e versione del motore (es. «ROCM — version: 0.5.0-dev (build 11327, commit 552f18f91)»).

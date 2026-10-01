@@ -106,3 +106,6 @@ Su Windows la temperatura nel Monitoraggio e' letta come in Gestione attivita'. 
 
 ## 21. Motore nella barra (v1.1.22)
 La barra di progresso del tuning riporta al centro backend e versione del motore in uso.
+
+## 22. Fine tuning e grafici (v1.1.23)
+A fine tuning la barra resta visibile con l'esito; «Vedi risultati» apre il passaggio Tuning con risultati e consigliato. Nel grafico dei token giornalieri l'output ha l'asse destro. Se la temperatura GPU resta «--», controllare la console del backend (riga «Temperatura GPU non disponibile»).
