@@ -79,6 +79,16 @@ def _parse_qword(raw: str) -> int:
         return 0
 
 
+def _fmt_driver(v: str) -> str:
+    """[2026-10-01 v1.1.7] DirectX registra DriverVersion come uint64 impacchettato (4 word da 16 bit):
+    es. 9007201288716303 -> 32.0.21013.xxxx. Se non e' un numero cosi' grande lo restituisce invariato."""
+    v = (v or "").strip()
+    if v.isdigit() and len(v) > 10:
+        n = int(v)
+        return ".".join(str((n >> sh) & 0xFFFF) for sh in (48, 32, 16, 0))
+    return v
+
+
 def _detect_gpu_windows(executor: Executor) -> dict:
     """Elenca le GPU Windows dal registro (classe display) e sceglie la piu' capiente.
     Con una iGPU + una dGPU (es. Ryzen + RX 9070 XT) vince la dGPU per quantita' di VRAM."""
@@ -121,7 +131,7 @@ def _detect_gpu_windows(executor: Executor) -> dict:
         "vendor": _gpu_vendor(name),
         "total_memory_gb": round(mem / 1024**3, 1),
         "free_memory_gb": 0,           # il registro non espone la VRAM libera
-        "driver": drv,
+        "driver": _fmt_driver(drv),
     }
 
 
