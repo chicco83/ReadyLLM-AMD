@@ -446,6 +446,14 @@ def get_job(job_id: str) -> Optional[dict]:
         return dict(job) if job else None
 
 
+def get_last_job(target_id: str) -> Optional[dict]:
+    """[2026-10-02 v1.1.23] Ultimo tuning (in corso, riuscito o fallito) della macchina: serve a non perdere esito e risultati
+    quando la pagina si ricarica o il pannello viene rimontato a fine tuning."""
+    with _LOCK:
+        jobs = [j for j in _JOBS.values() if j.get("target_id") == target_id]
+        return dict(jobs[-1]) if jobs else None
+
+
 def list_active_jobs(target_id: str) -> list:
     """Restituisce il riepilogo del task di tuning in corso sulla macchina target, per riprendere il polling dopo un refresh del frontend."""
     with _LOCK:

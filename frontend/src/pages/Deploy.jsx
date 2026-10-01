@@ -10,7 +10,16 @@ export default function Deploy({ targetId, target, embedded = false }) {
   const { t } = useI18n()
   const isVideo = target?.engine_type === 'comfyui'
   const [videoMode, setVideoMode] = useState('short') // short | long
-  const [step, setStep] = useState('deploy') // deploy | tune
+  // [2026-10-02 v1.1.23] Il passaggio scelto e' ricordato (sessionStorage) e il pulsante «Vedi risultati» della barra di progresso
+  // puo' portare al Tuning con l'evento 'readyllm:goto-tune': a fine tuning non si torna piu' da soli al Deploy.
+  // Versione precedente: const [step, setStep] = useState('deploy') // deploy | tune
+  const [step, setStepRaw] = useState(() => { try { return sessionStorage.getItem('readyllm.step') || 'deploy' } catch { return 'deploy' } })
+  const setStep = (v) => { setStepRaw(v); try { sessionStorage.setItem('readyllm.step', v) } catch { /* ignora */ } }
+  useEffect(() => {
+    const h = () => setStep('tune')
+    window.addEventListener('readyllm:goto-tune', h)
+    return () => window.removeEventListener('readyllm:goto-tune', h)
+  }, [])
   // [2026-10-01 v1.1.11] Deploy e Tuning sono due passaggi in sequenza nella stessa pagina (schede 1 -> 2).
   // Il modello scelto e' condiviso (lib/lastModel). Il tuning e' disponibile solo per llama.cpp.
   // Versione precedente: if (!isVideo) return <TextDeploy targetId={targetId} target={target} />

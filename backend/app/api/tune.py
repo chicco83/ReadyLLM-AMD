@@ -74,6 +74,12 @@ def active(target_id: str):
     return {"jobs": tuner.list_active_jobs(target_id)}
 
 
+@router.get("/last")
+def last(target_id: str):
+    """[2026-10-02 v1.1.23] Ultimo tuning della macchina (anche concluso): ripristina esito/risultati dopo un rimontaggio della pagina"""
+    return {"job": tuner.get_last_job(target_id)}
+
+
 @router.get("/options")
 def options():
     """Restituisce gli obiettivi di ottimizzazione disponibili e gli intervalli dei parametri baseline, per il rendering del frontend"""

@@ -113,6 +113,22 @@ function AutoTune({ targetId }) {
           if (j.goal) setGoal(j.goal)
           setLogs(j.last_logs || [])
           resumePoll(j.job_id)
+        } else {
+          // [2026-10-02 v1.1.23] Nessun tuning in corso: se l'ultimo e' concluso se ne mostrano esito e risultati
+          // (prima, rimontando il pannello a fine tuning, tornava vuoto e non si capiva com'era andata).
+          fetch(`/api/tune/last?target_id=${targetId}`).then(r => r.json()).then(x => {
+            const job = x.job
+            if (!job || (job.status !== 'success' && job.status !== 'failed')) return
+            if (job.model) setSelected(job.model)
+            if (job.ctx_size) setCtxSize(job.ctx_size)
+            if (job.goal) setGoal(job.goal)
+            setLogs(job.logs || [])
+            setResults(job.results || [])
+            setBest(job.best || null)
+            setBaseline(job.baseline || null)
+            setState(job.status)
+            if (job.error) setError(job.error)
+          }).catch(() => {})
         }
       })
       .catch(() => {})

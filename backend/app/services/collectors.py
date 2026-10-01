@@ -217,35 +217,34 @@ def _collect_gpu_amd_linux(executor: Executor) -> dict:
 # 5 s (Add-Type costa ~1 s); se non disponibile (driver senza supporto) restituisce 0 e non si riprova per 10 minuti.
 _PS_TEMP_SCRIPT = r"""
 $ErrorActionPreference='Stop'
+try {
 Add-Type -TypeDefinition @'
 using System; using System.Runtime.InteropServices;
 public static class GpuT {
-  [StructLayout(LayoutKind.Sequential)] public struct OPEN { public uint Lo; public int Hi; public uint H; }
-  [StructLayout(LayoutKind.Sequential)] public struct QAI { public uint H; public uint Type; public IntPtr Data; public uint Size; }
-  [StructLayout(LayoutKind.Sequential)] public struct CLOSE { public uint H; }
-  [StructLayout(LayoutKind.Sequential, Pack=8)] public struct PERF { public uint Idx; public ulong MF; public ulong MMF; public ulong MMFOC; public ulong MBW; public ulong PBW; public uint Fan; public uint Power; public uint Temp; public byte Pso; }
-  [DllImport("gdi32.dll")] static extern int D3DKMTOpenAdapterFromLuid(ref OPEN o);
-  [DllImport("gdi32.dll")] static extern int D3DKMTQueryAdapterInfo(ref QAI q);
-  [DllImport("gdi32.dll")] static extern int D3DKMTCloseAdapter(ref CLOSE c);
-  public static int Temp(uint lo, int hi) {
-    OPEN o = new OPEN(); o.Lo = lo; o.Hi = hi;
-    if (D3DKMTOpenAdapterFromLuid(ref o) != 0) return -1;
-    int t = -1;
-    IntPtr buf = Marshal.AllocHGlobal(128);
-    try {
-      QAI q = new QAI(); q.H = o.H; q.Type = 62; q.Data = buf; q.Size = (uint)Marshal.SizeOf(typeof(PERF));
-      if (D3DKMTQueryAdapterInfo(ref q) == 0) { PERF p = (PERF)Marshal.PtrToStructure(buf, typeof(PERF)); t = (int)p.Temp; }
-    } finally { Marshal.FreeHGlobal(buf); CLOSE c = new CLOSE(); c.H = o.H; D3DKMTCloseAdapter(ref c); }
-    return t;
-  }
+ [StructLayout(LayoutKind.Sequential)] public struct O { public uint Lo; public int Hi; public uint H; }
+ [StructLayout(LayoutKind.Sequential)] public struct Q { public uint H; public uint T; public IntPtr D; public uint S; }
+ [StructLayout(LayoutKind.Sequential)] public struct C { public uint H; }
+ [StructLayout(LayoutKind.Sequential, Pack=8)] public struct P { public uint I; public ulong A; public ulong B; public ulong C; public ulong D; public ulong E; public uint Fan; public uint Pw; public uint Tmp; public byte X; }
+ [DllImport("gdi32.dll")] static extern int D3DKMTOpenAdapterFromLuid(ref O o);
+ [DllImport("gdi32.dll")] static extern int D3DKMTQueryAdapterInfo(ref Q q);
+ [DllImport("gdi32.dll")] static extern int D3DKMTCloseAdapter(ref C c);
+ public static string Run(uint lo, int hi) {
+  O o = new O(); o.Lo = lo; o.Hi = hi;
+  int r = D3DKMTOpenAdapterFromLuid(ref o); if (r != 0) return "open=" + r;
+  IntPtr b = Marshal.AllocHGlobal(256); string res;
+  try { Q q = new Q(); q.H = o.H; q.T = 62; q.D = b; q.S = (uint)Marshal.SizeOf(typeof(P));
+   r = D3DKMTQueryAdapterInfo(ref q); if (r != 0) res = "query=" + r;
+   else { P p = (P)Marshal.PtrToStructure(b, typeof(P)); res = "T=" + p.Tmp; } }
+  finally { Marshal.FreeHGlobal(b); C c = new C(); c.H = o.H; D3DKMTCloseAdapter(ref c); }
+  return res; }
 }
 '@
 $m=Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory | Sort-Object DedicatedUsage -Descending | Select-Object -First 1
 if($m.Name -match 'luid_0x([0-9a-fA-F]+)_0x([0-9a-fA-F]+)'){
-  $hi=[Convert]::ToInt32($matches[1],16); $lo=[Convert]::ToUInt32($matches[2],16)
-  $t=[GpuT]::Temp($lo,$hi)
-  if($t -gt 0){ Write-Output ('GPUTEMP=' + [math]::Round($t/10.0,1)) }
-}
+ $r=[GpuT]::Run([Convert]::ToUInt32($matches[2],16),[Convert]::ToInt32($matches[1],16))
+ if($r -match '^T=(\d+)$' -and [int]$matches[1] -gt 0){ Write-Output ('GPUTEMP=' + [math]::Round([int]$matches[1]/10.0,1)) } else { Write-Output ('GPUTEMPERR=' + $r) }
+} else { Write-Output 'GPUTEMPERR=luid-non-trovato' }
+} catch { Write-Output ('GPUTEMPERR=' + $_.Exception.Message) }
 """
 _TEMP_CACHE: dict = {}   # chiave target -> (timestamp, valore) ; valore None = non disponibile
 
@@ -265,6 +264,10 @@ def _gpu_temp_windows(executor: Executor, target: Target) -> float:
         val = float(kv.get("GPUTEMP"))
     except (TypeError, ValueError):
         val = None
+        # [2026-10-02 v1.1.23] il motivo del fallimento finisce nella console del backend (prima era silenzioso)
+        import logging
+        logging.getLogger("uvicorn.error").warning("Temperatura GPU non disponibile: %s | %s",
+                                                    kv.get("GPUTEMPERR", "nessun output"), (r.stderr or "")[:300])
     _TEMP_CACHE[key] = (_t.time(), val)
     return val or 0.0
 
@@ -611,6 +614,14 @@ def collect_metrics(executor: Executor, target: Target) -> dict:
     prompt_seconds = m.get("llamacpp:prompt_seconds_total", 0)
     predict_seconds = m.get("llamacpp:tokens_predicted_seconds_total", 0)
     cached_tokens = m.get("llamacpp:prompt_tokens_cached_total", 0)
+    # [2026-10-02 v1.1.23] Le build recenti possono chiamare diversamente la metrica dei token riusati dalla cache: se il nome
+    # standard manca si cerca un contatore *_total con «cache» e «token» nel nome (esclusi i gauge di occupazione).
+    # Nota: se la build non espone nessuna metrica di questo tipo il valore resta 0 (non c'e' dato da cui calcolarlo).
+    if not cached_tokens:
+        for k, v in m.items():
+            if k.startswith("llamacpp:") and "cache" in k and "token" in k and k.endswith("_total") and "kv_cache" not in k:
+                cached_tokens = v
+                break
     spec_draft = m.get("llamacpp:spec_decode_num_draft_tokens_total", 0)
     spec_accepted = m.get("llamacpp:spec_decode_num_accepted_tokens_total", 0)
 

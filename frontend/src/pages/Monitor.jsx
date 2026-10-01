@@ -196,14 +196,18 @@ export default function Monitor({ targetId, target }) {
           <BarChart data={tokenStats} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#3a3a4c" />
             <XAxis dataKey="date" stroke="#6c7086" fontSize={10} tickLine={false} tickFormatter={(d) => d.slice(5)} />
-            <YAxis stroke="#6c7086" fontSize={10} tickLine={false} width={45} tickFormatter={(v) => fmtTokens(v)} />
+            <YAxis yAxisId="left" stroke="#6c7086" fontSize={10} tickLine={false} width={45} tickFormatter={(v) => fmtTokens(v)} />
             <Tooltip
               contentStyle={{ background: '#181825', border: '1px solid #45475a', borderRadius: 8, fontSize: 12 }}
               formatter={(val, name) => [fmtTokens(val), name === 'prompt' ? t('monitor.promptTokens') : t('monitor.outputTokens')]}
             />
             <Legend formatter={(v) => (v === 'prompt' ? t('monitor.promptTokens') : t('monitor.outputTokens'))} />
-            <Bar dataKey="prompt" fill="#89b4fa" radius={[3, 3, 0, 0]} />
-            <Bar dataKey="completion" fill="#a6e3a1" radius={[3, 3, 0, 0]} />
+            {/* [2026-10-02 v1.1.23] Asse destro dedicato all'output: i token generati sono ordini di grandezza meno dei token prompt
+                (es. 5000 di prompt contro 65 generati nel tuning) e sulla scala comune la barra verde era invisibile.
+                Versione precedente: una sola scala (YAxis unico) e <Bar dataKey="completion" .../> senza yAxisId */}
+            <YAxis yAxisId="right" orientation="right" stroke="#a6e3a1" fontSize={10} tickLine={false} width={45} tickFormatter={(v) => fmtTokens(v)} />
+            <Bar dataKey="prompt" yAxisId="left" fill="#89b4fa" radius={[3, 3, 0, 0]} />
+            <Bar dataKey="completion" yAxisId="right" fill="#a6e3a1" radius={[3, 3, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>

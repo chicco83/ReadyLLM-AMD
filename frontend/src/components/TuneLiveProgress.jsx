@@ -1,16 +1,20 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useI18n } from '../i18n/I18nContext'
 
 // [2026-10-01 v1.1.19] Barra di progresso del tuning sempre visibile nella pagina Monitoraggio (qualunque passaggio sia aperto:
-// Deploy o Tuning). Interroga GET /api/tune/active ogni 2 s: se c'e' un tuning in corso mostra fase, prove completate/totale
-// stimato e, a richiesta, le ultime righe del log. Se non c'e' nessun tuning non occupa spazio.
+// Deploy o Tuning). Interroga GET /api/tune/active ogni 2 s: fase, prove completate/totale stimato, motore al centro (v1.1.22)
+// e, a richiesta, le ultime righe del log.
+// [2026-10-02 v1.1.23] A fine tuning la barra NON scompare piu': resta in stato «concluso» (verde, 100%) o «fallito» (rosso) con
+// l'esito, la configurazione consigliata e il pulsante «Vedi risultati» (porta al passaggio Tuning); si chiude con la X.
+// Versione precedente: if (!job) return null  (la barra spariva appena il tuning finiva)
 export default function TuneLiveProgress({ targetId }) {
   const { t } = useI18n()
   const [job, setJob] = useState(null)
+  const [final, setFinal] = useState(null)       // ultimo job concluso (success|failed)
+  const [dismissed, setDismissed] = useState('') // job_id chiuso dall'utente
   const [showLog, setShowLog] = useState(true)
-  // [2026-10-02 v1.1.22] Dettaglio del motore (backend + versione, es. «ROCM — version: 0.5.0-dev (build 11327, commit ...)»)
-  // mostrato al centro della barra; si legge una volta sola quando parte un tuning (GET /api/target/<id>/engine).
   const [engineInfo, setEngineInfo] = useState('')
+  const lastId = useRef('')
 
   useEffect(() => {
     if (!targetId) return
@@ -19,7 +23,13 @@ export default function TuneLiveProgress({ targetId }) {
       try {
         const r = await fetch(`/api/tune/active?target_id=${targetId}`)
         const d = await r.json()
-        if (!stop) setJob((d.jobs || [])[0] || null)
+        const cur = (d.jobs || [])[0] || null
+        if (stop) return
+        if (cur) { lastId.current = cur.job_id; setFinal(null); setJob(cur); return }
+        setJob(null)
+        // nessun tuning attivo: se ne esiste uno concluso lo si mostra come stato finale
+        const l = await (await fetch(`/api/tune/last?target_id=${targetId}`)).json()
+        if (!stop && l.job && (l.job.status === 'success' || l.job.status === 'failed')) setFinal(l.job)
       } catch { /* backend non raggiungibile: si riprova */ }
     }
     tick()
@@ -27,40 +37,55 @@ export default function TuneLiveProgress({ targetId }) {
     return () => { stop = true; clearInterval(id) }
   }, [targetId])
 
-  const running = !!job
+  const shown = job || (final && final.job_id !== dismissed ? final : null)
   useEffect(() => {
-    if (!running || !targetId || engineInfo) return
+    if (!shown || !targetId || engineInfo) return
     fetch(`/api/target/${targetId}/engine`).then(r => r.json()).then(d => {
-      const be = (d.backend || '').toUpperCase()
-      const ver = d.version || ''
-      setEngineInfo([be, ver].filter(Boolean).join(' — '))
+      setEngineInfo([(d.backend || '').toUpperCase(), d.version || ''].filter(Boolean).join(' — '))
     }).catch(() => {})
-  }, [running, targetId])
+  }, [!!shown, targetId])
 
-  if (!job) return null
-  const pr = job.progress || { done: 0, total: 1, phase: '' }
-  const pct = Math.min(99, Math.round((pr.done / Math.max(pr.total, 1)) * 100))
+  if (!shown) return null
+  const done = !job
+  const failed = done && shown.status === 'failed'
+  const pr = shown.progress || { done: 0, total: 1, phase: '' }
+  const pct = done ? 100 : Math.min(99, Math.round((pr.done / Math.max(pr.total, 1)) * 100))
+  const logs = done ? (shown.logs || []).slice(-8) : (shown.last_logs || [])
+  const color = failed ? 'bg-red/60' : done ? 'bg-green/60' : 'bg-blue/60'
   return (
-    <div className="mt-6 bg-card rounded-xl p-4 border-2 border-blue/50">
+    <div className={`mt-6 bg-card rounded-xl p-4 border-2 ${failed ? 'border-red/60' : done ? 'border-green/60' : 'border-blue/50'}`}>
       <div className="flex items-center gap-3 mb-2 text-sm">
-        <span className="w-2 h-2 rounded-full bg-green animate-pulse" />
-        <span className="font-semibold">{t('tune.live')}</span>
-        <span className="text-gray">{pr.phase}</span>
-        <span className="ml-auto text-gray">{pr.done}/{pr.total} {t('tune.liveStep')} · {pct}%</span>
+        <span className={`w-2 h-2 rounded-full ${done ? (failed ? 'bg-red' : 'bg-green') : 'bg-green animate-pulse'}`} />
+        <span className="font-semibold">{done ? (failed ? t('tune.liveFailed') : t('tune.liveDone')) : t('tune.live')}</span>
+        {!done && <span className="text-gray">{pr.phase}</span>}
+        <span className="ml-auto text-gray">{done ? '' : `${pr.done}/${pr.total} ${t('tune.liveStep')} · ${pct}%`}</span>
         <button className="text-xs text-blue underline" onClick={() => setShowLog(v => !v)}>
           {showLog ? t('tune.liveHideLog') : t('tune.liveShowLog')}
         </button>
+        {done && (
+          <>
+            <button className="text-xs px-2 py-1 rounded bg-blue text-bg font-semibold"
+              onClick={() => window.dispatchEvent(new Event('readyllm:goto-tune'))}>{t('tune.liveResults')}</button>
+            <button className="text-gray hover:text-fg" title="OK" onClick={() => setDismissed(shown.job_id)}>✕</button>
+          </>
+        )}
       </div>
-      {/* Versione precedente: barra sottile h-3 senza testo. Ora piu' alta, con il motore al centro. */}
       <div className="relative h-7 rounded-full bg-bg overflow-hidden">
-        <div className="h-full bg-blue/60 transition-all duration-500" style={{ width: `${pct}%` }} />
+        <div className={`h-full ${color} transition-all duration-500`} style={{ width: `${pct}%` }} />
         <div className="absolute inset-0 flex items-center justify-center px-3 text-xs font-semibold text-fg truncate" title={engineInfo}>
           {engineInfo}
         </div>
       </div>
+      {done && (
+        <div className="mt-2 text-xs">
+          {failed
+            ? <span className="text-red">{shown.error || ''}</span>
+            : <span className="text-green">{shown.best?.label} · {shown.best?.metrics?.decode} t/s</span>}
+        </div>
+      )}
       {showLog && (
         <div className="mt-3 bg-bg rounded-lg p-3 font-mono text-xs text-fg/80 space-y-0.5 max-h-40 overflow-auto">
-          {(job.last_logs || []).map((l, i) => (
+          {logs.map((l, i) => (
             <div key={i}><span className="text-gray/50">[{l.t}] </span>{l.msg}</div>
           ))}
         </div>
