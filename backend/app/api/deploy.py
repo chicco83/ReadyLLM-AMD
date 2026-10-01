@@ -61,6 +61,26 @@ def _record_running(target_id: str, model: str):
     _save_running(data)
 
 
+# [2026-10-02 v1.1.29] Parametri con cui e' stato avviato il modello in esecuzione (per mostrare nel Monitoraggio se usa
+# decodifica speculativa MTP / ngram). File separato: running_models.json resta {target: modello} (retrocompatibile).
+_ARGS_FILE = os.path.expanduser("~/.model-deploy-assistant/running_args.json")
+
+
+def _record_args(target_id: str, args: list):
+    try:
+        try:
+            with open(_ARGS_FILE, "r", encoding="utf-8") as f:
+                d = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, IOError):
+            d = {}
+        d[target_id] = list(args)
+        os.makedirs(os.path.dirname(_ARGS_FILE), exist_ok=True)
+        with open(_ARGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
 def _clear_running(target_id: str):
     data = _load_running()
     if target_id in data:
@@ -273,6 +293,7 @@ def start_model(req: DeployRequest):
         success, msg = engine.start(params)
         if success:
             _record_running(req.target_id, req.model)
+            _record_args(req.target_id, extra)
         return {"success": success, "message": msg, "args": extra, "port": target.service_port}
     finally:
         executor.close()
@@ -289,6 +310,30 @@ def stop_model(target_id: str):
         return {"success": success, "message": msg}
     finally:
         executor.close()
+
+
+@router.get("/spec")
+def spec_info(target_id: str):
+    """[2026-10-02 v1.1.29] Decodifica speculativa del modello in esecuzione: tipo (none / draft-mtp / ngram-*), n-max e dove vive.
+    MTP = teste di predizione incluse nel modello (stessa memoria dei pesi: VRAM con n-gpu-layers all, RAM solo se gli strati
+    del draft sono su CPU, vedi --spec-draft-ngl / --gpu-layers-draft); ngram-* = ricerca nella cronologia dei token (RAM/CPU, nessun
+    modello aggiuntivo e nessun uso del disco)."""
+    try:
+        with open(_ARGS_FILE, "r", encoding="utf-8") as f:
+            args = json.load(f).get(target_id)
+    except (FileNotFoundError, json.JSONDecodeError, IOError):
+        args = None
+    if args is None:
+        return {"known": False}
+    def val(name, default=""):
+        for i, tok in enumerate(args):
+            if tok == f"--{name}" and i + 1 < len(args):
+                return args[i + 1]
+        return default
+    stype = val("spec-type", "none")
+    return {"known": True, "type": stype, "n_max": val("spec-draft-n-max"), "n_min": val("spec-draft-n-min"),
+            "ngl": val("n-gpu-layers", val("gpu-layers")), "draft_ngl": val("spec-draft-ngl", val("gpu-layers-draft")),
+            "kv_k": val("cache-type-k", "f16"), "kv_v": val("cache-type-v", "f16")}
 
 
 @router.get("/status")

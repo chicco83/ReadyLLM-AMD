@@ -720,15 +720,29 @@ def _try_other_engines(executor, target, model_path, ctx_size, goal, job_id, bes
     _set_progress(job_id, total=_done + len(alts))
     out = []
     for a in alts:
+        nome = a.get("backend", "?")
+        # [2026-10-02 v1.1.29] Una build puo' avere la DLL del backend (ggml-hip.dll, quindi «rocm») ma NON vedere la scheda: allora
+        # parte e lavora sulla CPU (CPU al 100%, GPU ferma) e la misura non ha senso. Prima si controlla che --list-devices
+        # elenchi un dispositivo GPU, poi, a prova fatta, che il log dica «offloaded N/M layers to GPU» con N > 0.
+        # Versione precedente: nessun controllo, la misura su CPU veniva confrontata come se fosse GPU.
+        if not a.get("devices"):
+            _append_log(job_id, f"  [motore {nome}] saltato: --list-devices non elenca nessuna GPU (il runtime {nome} non vede la scheda: "
+                                f"driver AMD con HIP mancante o GPU non supportata da questa build)")
+            _set_progress(job_id, step=True)
+            continue
         alt_target = replace(target, engine_path=a["path"])
         eng = LlamaCppAdapter(executor, alt_target)
-        r = _run_one(executor, alt_target, eng, model_path, best["config"], ctx_size, job_id, f"motore {a.get('backend', '?')}")
+        r = _run_one(executor, alt_target, eng, model_path, best["config"], ctx_size, job_id, f"motore {nome}")
         if not r:
-            _append_log(job_id, f"  [motore {a.get('backend', '?')}] non utilizzabile con questa configurazione: saltato")
+            _append_log(job_id, f"  [motore {nome}] non utilizzabile con questa configurazione: saltato")
+            continue
+        off = _offload_from_log(executor, target)
+        if off is not None and off[0] == 0:
+            _append_log(job_id, f"  [motore {nome}] scartato: 0/{off[1]} strati su GPU, ha lavorato sulla CPU (misura non valida)")
             continue
         r["score"] = _score(r["metrics"], goal)
-        r["engine"] = {"backend": a.get("backend", ""), "version": a.get("version", ""), "path": a["path"]}
-        r["label"] = f"{r['label']} @ {a.get('backend', '?')}"
+        r["engine"] = {"backend": nome, "version": a.get("version", ""), "path": a["path"]}
+        r["label"] = f"{r['label']} @ {nome}"
         out.append(r)
     return out
 
@@ -926,6 +940,22 @@ def _log_server_tail(executor: Executor, target: Target, righe: int = 12) -> lis
         cmd = f"tail -n {righe} /tmp/llama_server.log 2>/dev/null"
     r = executor.run(cmd, timeout=10)
     return [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+
+
+def _offload_from_log(executor: Executor, target: Target):
+    """[2026-10-02 v1.1.29] (strati su GPU, strati totali) letti da «offloaded N/M layers to GPU» nel log di llama-server, o None.
+    Serve a scartare le misure di una build che parte ma lavora sulla CPU (es. ROCm/HIP che non vede la scheda)."""
+    import re as _re
+    if target.os == "windows":
+        cmd = 'powershell -NoProfile -Command "Get-Content -Tail 400 C:\\temp\\llama_server.log"'
+    else:
+        cmd = "tail -n 400 /tmp/llama_server.log 2>/dev/null"
+    r = executor.run(cmd, timeout=10)
+    for ln in reversed((r.stdout or "").splitlines()):
+        m = _re.search(r"offloaded\s+(\d+)\s*/\s*(\d+)\s+layers\s+to\s+GPU", ln, _re.I)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+    return None
 
 
 def _get_gpu_vram(executor: Executor, target: Target) -> float:

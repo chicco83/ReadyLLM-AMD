@@ -3,6 +3,8 @@ import { XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaCh
 import { useState, useEffect } from 'react'
 import Deploy from './Deploy'
 import TuneLiveProgress from '../components/TuneLiveProgress'
+import TuningImpact from '../components/TuningImpact'
+import SpecCard from '../components/SpecCard'
 import { useI18n } from '../i18n/I18nContext'
 
 const MAX_POINTS = 60
@@ -171,6 +173,9 @@ export default function Monitor({ targetId, target }) {
         <MetricCard label={t('monitor.specAccept')} value={metrics.spec_accept_rate} unit="%" color="text-teal" />
       </div>
 
+      {/* [2026-10-02 v1.1.29] decodifica speculativa in uso (MTP / ngram) e dove vive */}
+      <SpecCard targetId={targetId} acceptRate={metrics.spec_accept_rate} />
+
       {/* Grafici a curve */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <ChartPanel title={t('monitor.chartSpeed')} data={h.speed} dataKey="value" color="#a6e3a1" unit=" t/s" />
@@ -178,39 +183,9 @@ export default function Monitor({ targetId, target }) {
         <ChartPanel title={t('monitor.chartSpec')} data={h.spec} dataKey="value" color="#94e2d5" unit="%" />
       </div>
 
-      {/* Statistiche d'uso dei token (per giorno, input/output) */}
-      <div className="bg-card rounded-lg p-4 border border-gray/30 mt-4">
-        <div className="flex items-center justify-between mb-2">
-          <div className="text-sm font-semibold">{t('monitor.tokenUsage')}</div>
-          <div className="text-xs text-gray">
-            {t('monitor.tokenTotal')}{' '}
-            <span className="text-fg font-semibold text-sm">{fmtTokens(tokenTotal.total)}</span>
-            <span className="ml-2">
-              <span className="text-blue">{t('monitor.promptTokens')} {fmtTokens(tokenTotal.prompt)}</span>
-              <span className="mx-1">·</span>
-              <span className="text-green">{t('monitor.outputTokens')} {fmtTokens(tokenTotal.completion)}</span>
-            </span>
-          </div>
-        </div>
-        <ResponsiveContainer width="100%" height={200}>
-          <BarChart data={tokenStats} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#3a3a4c" />
-            <XAxis dataKey="date" stroke="#6c7086" fontSize={10} tickLine={false} tickFormatter={(d) => d.slice(5)} />
-            <YAxis yAxisId="left" stroke="#6c7086" fontSize={10} tickLine={false} width={45} tickFormatter={(v) => fmtTokens(v)} />
-            <Tooltip
-              contentStyle={{ background: '#181825', border: '1px solid #45475a', borderRadius: 8, fontSize: 12 }}
-              formatter={(val, name) => [fmtTokens(val), name === 'prompt' ? t('monitor.promptTokens') : t('monitor.outputTokens')]}
-            />
-            <Legend formatter={(v) => (v === 'prompt' ? t('monitor.promptTokens') : t('monitor.outputTokens'))} />
-            {/* [2026-10-02 v1.1.23] Asse destro dedicato all'output: i token generati sono ordini di grandezza meno dei token prompt
-                (es. 5000 di prompt contro 65 generati nel tuning) e sulla scala comune la barra verde era invisibile.
-                Versione precedente: una sola scala (YAxis unico) e <Bar dataKey="completion" .../> senza yAxisId */}
-            <YAxis yAxisId="right" orientation="right" stroke="#a6e3a1" fontSize={10} tickLine={false} width={45} tickFormatter={(v) => fmtTokens(v)} />
-            <Bar dataKey="prompt" yAxisId="left" fill="#89b4fa" radius={[3, 3, 0, 0]} />
-            <Bar dataKey="completion" yAxisId="right" fill="#a6e3a1" radius={[3, 3, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+      {/* [2026-10-02 v1.1.29] Al posto del grafico «Utilizzo dei token (per giorno)» (poco utile): prima/dopo dell'ultimo tuning.
+          Versione precedente: BarChart prompt/completion per giorno con asse destro per l'output (dati ancora raccolti dal backend). */}
+      <TuningImpact targetId={targetId} />
 
       {/* [2026-10-01 v1.1.19] barra di progresso del tuning, visibile anche guardando i grafici */}
       <TuneLiveProgress targetId={targetId} />
