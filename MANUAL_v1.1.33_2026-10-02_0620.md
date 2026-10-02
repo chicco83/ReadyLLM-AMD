@@ -146,3 +146,6 @@ Durante l'installazione di un motore Impostazioni mostra una barra con la percen
 
 ## 32. Seguire il tuning (v1.1.32)
 La barra sotto i grafici mostra la prova in corso, il log del motore in diretta e un avviso se il motore e' muto da piu' di 45 s. Se la VRAM supera il 92% il log del tuning lo segnala: su Windows la velocita' crolla perche' le allocazioni finiscono nella RAM condivisa; usare cache KV q4_0, un contesto minore o un modello piu' leggero.
+
+## 33. Tuning con piu' motori e stop (v1.1.33)
+Con 2+ build GPU installate e l'opzione «Prova anche gli altri motori» il tuning inizia con una gara rapida tra i motori (una misura ciascuno) e prosegue solo con il piu' veloce; l'applicazione cambia anche il motore se serve. Il pulsante «Ferma il tuning» nella barra di progresso annulla un tuning bloccato e ferma il modello. Se tutte le combinazioni vengono saltate per «VRAM insufficiente» nonostante il modello giri, riporta le righe `KV` del log del motore.

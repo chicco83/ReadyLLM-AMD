@@ -136,3 +136,5 @@ Rimossa da `EngineRow` la sezione «Build installate / Attiva / Installa»; spos
 - v1.1.31: `installer._win_download` con thread + polling dimensione file, `_set_dl_progress`; `tune_history.score_kind` e `_legacy_decode` (via `tune_log.last_decode`).
 
 - v1.1.32: `services/running_args.py`; `_set_progress(current=...)`; `TuneLiveProgress` con log motore (`GET /api/deploy/log`) e `quietSec`; avviso `gpu_mem_pct >= 92` in `_run_one_inner`.
+
+- v1.1.33: `_pick_engine` (rimpiazza `_try_other_engines`), worker con `nonlocal target`, `quick` in `_run_one/_bench_median`, `_KV_DEV_RE`, `cancel_job` + `POST /api/tune/cancel`.

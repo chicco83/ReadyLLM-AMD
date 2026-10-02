@@ -1,8 +1,13 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.32** — 2026-10-02 05:50
+Versione corrente: **1.1.33** — 2026-10-02 06:20
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 35. v1.1.33 — 2026-10-02 06:20 — Tuning lento/bloccato: motore scelto prima, calibrazione KV, stop
+- **Scelta del motore prima del tuning:** con «Prova anche gli altri motori» ogni build GPU fa un confronto rapido (stessa configurazione neutra, una misura) e il tuning completo gira solo sul vincitore. Prima la fase di confronto era alla fine: con ROCm lento (14 t/s contro 66 di Vulkan) ogni prova durava minuti e il tuning sembrava fermo. Build senza GPU visibile o con 0 strati su GPU sono escluse. (`_try_other_engines` non e' piu' chiamata.)
+- **Calibrazione KV:** il formato della riga KV nei log recenti (`KV buffer size = X MiB`) non era riconosciuto, quindi la calibrazione non scattava mai e la stima scartava tutte le combinazioni («Saltata (VRAM insufficiente)») anche per modelli ibridi con KV piccola. Ora si riconoscono entrambi i formati (totale o per dispositivo).
+- **Ferma il tuning:** pulsante nella barra di progresso (`POST /api/tune/cancel`): segna il job come annullato e ferma il server.
 
 ## 34. v1.1.32 — 2026-10-02 05:50 — Trasparenza durante il tuning
 - La scheda «Decodifica speculativa» mostra il tipo in uso anche durante il tuning: il tuner scrive i parametri di ogni prova in `running_args.json` (nuovo modulo `services/running_args.py`, condiviso con il Deploy).
