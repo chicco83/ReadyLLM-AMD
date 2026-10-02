@@ -38,9 +38,12 @@ export default function TuneLiveProgress({ targetId }) {
         if (!stop && l.job && (l.job.status === 'success' || l.job.status === 'failed')) setFinal(l.job)
       } catch { /* backend non raggiungibile: si riprova */ }
     }
+    // [2026-10-02 v1.1.35] all'avvio di un nuovo tuning si toglie subito lo stato finale del precedente (prima restava fino al polling)
+    const onStart = () => { setFinal(null); setDismissed(''); setTimeout(tick, 700) }
+    window.addEventListener('readyllm:tune-started', onStart)
     tick()
     const id = setInterval(tick, 2000)
-    return () => { stop = true; clearInterval(id) }
+    return () => { stop = true; clearInterval(id); window.removeEventListener('readyllm:tune-started', onStart) }
   }, [targetId])
 
   useEffect(() => {

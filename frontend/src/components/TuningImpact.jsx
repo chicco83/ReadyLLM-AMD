@@ -11,21 +11,30 @@ const short = (m) => (m || '').split(/[\\/]/).pop()
 export default function TuningImpact({ targetId }) {
   const { t } = useI18n()
   const [entries, setEntries] = useState(null)
+  // [2026-10-02 v1.1.35] tuning in corso: il confronto del tuning precedente (altro modello) non va mostrato come se fosse attuale
+  const [running, setRunning] = useState(null)
 
   useEffect(() => {
     if (!targetId) return
     const load = () => fetch(`/api/tune/history?target_id=${targetId}`).then(r => r.json())
       .then(d => setEntries((d.entries || []).filter(e => e.status === 'success'))).catch(() => {})
-    load()
+    const loadRun = () => fetch(`/api/tune/active?target_id=${targetId}`).then(r => r.json())
+      .then(d => { const j = (d.jobs || [])[0]; setRunning(j ? { model: j.model } : null); if (!j) load() }).catch(() => {})
+    load(); loadRun()
+    const onStart = () => { setRunning({ model: '' }); setTimeout(loadRun, 700) }
+    window.addEventListener('readyllm:tune-started', onStart)
     const id = setInterval(load, 30000)
-    return () => clearInterval(id)
+    const id2 = setInterval(loadRun, 3000)
+    return () => { clearInterval(id); clearInterval(id2); window.removeEventListener('readyllm:tune-started', onStart) }
   }, [targetId])
 
   const last = entries && entries[0]
   return (
     <div className="bg-card rounded-lg p-4 border border-gray/30 mt-4">
       <div className="text-sm font-semibold mb-1">{t('impact.title')}</div>
-      {!last ? (
+      {running ? (
+        <div className="text-sm text-gray py-6">{t('impact.running')}{running.model ? ` — ${short(running.model)}` : ''}</div>
+      ) : !last ? (
         <div className="text-sm text-gray py-6">{entries === null ? '…' : t('impact.empty')}</div>
       ) : (
         <>

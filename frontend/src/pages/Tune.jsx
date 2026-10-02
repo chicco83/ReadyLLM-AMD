@@ -73,6 +73,10 @@ function AutoTune({ targetId }) {
   const [altBuilds, setAltBuilds] = useState(0)
   const [tryEngines, setTryEngines] = useState(true)
   const [applyMsg, setApplyMsg] = useState('')
+  // [2026-10-02 v1.1.35] Modello a cui si riferiscono i risultati mostrati (ultimo tuning avviato o ripristinato). Se l'utente sceglie
+  // un altro modello, esiti, confronto prima/dopo e «Salva e applica» del modello precedente vengono azzerati (restavano visibili
+  // e potevano essere applicati al modello sbagliato).
+  const shownModelRef = useRef('')
   const pollRef = useRef(null)
 
   function resumePoll(jobId) {
@@ -115,7 +119,7 @@ function AutoTune({ targetId }) {
         const jobs = d.jobs || []
         if (jobs.length > 0) {
           const j = jobs[0]
-          if (j.model) setSelected(j.model)
+          if (j.model) { shownModelRef.current = j.model; setSelected(j.model) }
           if (j.ctx_size) setCtxSize(j.ctx_size)
           if (j.goal) setGoal(j.goal)
           setLogs(j.last_logs || [])
@@ -126,7 +130,7 @@ function AutoTune({ targetId }) {
           fetch(`/api/tune/last?target_id=${targetId}`).then(r => r.json()).then(x => {
             const job = x.job
             if (!job || (job.status !== 'success' && job.status !== 'failed')) return
-            if (job.model) setSelected(job.model)
+            if (job.model) { shownModelRef.current = job.model; setSelected(job.model) }
             if (job.ctx_size) setCtxSize(job.ctx_size)
             if (job.goal) setGoal(job.goal)
             setLogs(job.logs || [])
@@ -162,8 +166,17 @@ function AutoTune({ targetId }) {
       .catch(() => {})
   }, [targetId, selected])
 
+  useEffect(() => {
+    if (state === 'running' || !selected || selected === shownModelRef.current) return
+    setResults([]); setBest(null); setBaseline(null); setLogs([]); setError(''); setApplyMsg(''); setSaved(false)
+    if (state !== 'idle') setState('idle')
+  }, [selected])
+
   async function start() {
     setState('running')
+    shownModelRef.current = selected
+    // avvisa subito barra di progresso e pannello «Effetto del tuning»: il confronto del tuning precedente va tolto senza attendere il polling
+    window.dispatchEvent(new Event('readyllm:tune-started'))
     setLogs([]); setResults([]); setError(''); setBest(null); setBaseline(null); setApplyMsg(''); setSaved(false)
     const res = await fetch('/api/tune/start', {
       method: 'POST',
