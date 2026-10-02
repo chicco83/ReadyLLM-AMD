@@ -149,3 +149,6 @@ La barra sotto i grafici mostra la prova in corso, il log del motore in diretta 
 
 ## 33. Tuning con piu' motori e stop (v1.1.33)
 Con 2+ build GPU installate e l'opzione «Prova anche gli altri motori» il tuning inizia con una gara rapida tra i motori (una misura ciascuno) e prosegue solo con il piu' veloce; l'applicazione cambia anche il motore se serve. Il pulsante «Ferma il tuning» nella barra di progresso annulla un tuning bloccato e ferma il modello. Se tutte le combinazioni vengono saltate per «VRAM insufficiente» nonostante il modello giri, riporta le righe `KV` del log del motore.
+
+## 34. Motore nella barra (v1.1.34)
+Il nome al centro della barra di progresso e' il motore usato dal tuning in quel momento; segue il confronto tra motori e, alla fine, indica quello consigliato.

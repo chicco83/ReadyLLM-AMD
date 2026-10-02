@@ -1,8 +1,11 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.33** — 2026-10-02 06:20
+Versione corrente: **1.1.34** — 2026-10-02 06:35
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 36. v1.1.34 — 2026-10-02 06:35 — Motore corretto nella barra di progresso
+- La barra mostra il motore con cui il tuning sta misurando in quel momento (campo `progress.engine`): cambia durante il confronto tra motori e dopo la scelta del vincitore; a tuning concluso mostra il motore della configurazione consigliata. Prima era letto una volta sola dalla configurazione della macchina (restava «ROCM» anche con il tuning su Vulkan).
 
 ## 35. v1.1.33 — 2026-10-02 06:20 — Tuning lento/bloccato: motore scelto prima, calibrazione KV, stop
 - **Scelta del motore prima del tuning:** con «Prova anche gli altri motori» ogni build GPU fa un confronto rapido (stessa configurazione neutra, una misura) e il tuning completo gira solo sul vincitore. Prima la fase di confronto era alla fine: con ROCm lento (14 t/s contro 66 di Vulkan) ogni prova durava minuti e il tuning sembrava fermo. Build senza GPU visibile o con 0 strati su GPU sono escluse. (`_try_other_engines` non e' piu' chiamata.)
