@@ -1,8 +1,13 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.35** — 2026-10-02 06:50
+Versione corrente: **1.1.36** — 2026-10-02 07:20
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 38. v1.1.36 — 2026-10-02 07:20 — Grafici del tuning in tempo reale
+- Il pannello «Effetto del tuning» del Monitoraggio, durante un tuning, mostra tre grafici animati (decodifica, prefill, TTFT) con una barra per ogni prova conclusa che si aggiunge man mano, linea tratteggiata della baseline, barra grigia = baseline, verde = migliore finora; sotto il confronto prima/dopo con la migliore finora. Aggiornamento ogni 2 s.
+- A tuning fermo il pannello mostra l'ultimo tuning concluso, ora con l'etichetta «Ultimo tuning concluso».
+- Backend: ogni prova (anche fallita) e' registrata in `job["trials"]` (`_add_trial`) ed esposta da `GET /api/tune/active`.
 
 ## 37. v1.1.35 — 2026-10-02 06:50 — Prima/dopo azzerato con un nuovo tuning
 - Tuning: scegliendo un altro modello si azzerano esito, confronto prima/dopo e «Salva e applica» del modello precedente (potevano essere applicati al modello sbagliato).

@@ -155,3 +155,6 @@ Il nome al centro della barra di progresso e' il motore usato dal tuning in quel
 
 ## 35. Risultati e cambio modello (v1.1.35)
 Cambiando modello nel Tuning, o avviando un nuovo tuning, i risultati e il confronto prima/dopo precedenti spariscono; durante il tuning il pannello «Effetto del tuning» indica che e' in corso e mostra il nuovo confronto alla fine.
+
+## 36. Grafici in tempo reale (v1.1.36)
+Durante il tuning, «Effetto del tuning» si anima: ogni prova conclusa aggiunge una barra ai grafici di decodifica, prefill e TTFT (tratteggio = baseline, grigio = baseline, verde = migliore finora, blu = altre). Passando il mouse su una barra si vede la prova. Le prove fallite sono contate a parte. A tuning concluso il pannello torna al confronto prima/dopo finale.

@@ -142,3 +142,5 @@ Rimossa da `EngineRow` la sezione «Build installate / Attiva / Installa»; spos
 - v1.1.34: `_set_progress(engine=...)` chiamato in `_pick_engine` e dopo i metadati; `TuneLiveProgress` usa `progress.engine` / `best.engine`.
 
 - v1.1.35: `Tune.jsx` `shownModelRef` + effetto di reset su `selected`; evento `readyllm:tune-started` ascoltato da `TuneLiveProgress` e `TuningImpact` (che interroga anche `/api/tune/active`).
+
+- v1.1.36: `tuner._add_trial` (job['trials']), `list_active_jobs` con `trials`; `LiveTuning.jsx` (Recharts) usato da `TuningImpact`.
