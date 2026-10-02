@@ -75,6 +75,19 @@ def active(target_id: str):
     return {"jobs": tuner.list_active_jobs(target_id)}
 
 
+@router.post("/cancel")
+def cancel(target_id: str):
+    """[2026-10-02 v1.1.33] Ferma il tuning in corso: lo segna come annullato e ferma llama-server cosi' la prova in corso termina subito"""
+    n = tuner.cancel_job(target_id)
+    if n:
+        try:
+            from . import deploy
+            deploy.stop_model(target_id)
+        except Exception:
+            pass
+    return {"ok": True, "cancelled": n}
+
+
 @router.get("/last")
 def last(target_id: str):
     """[2026-10-02 v1.1.23] Ultimo tuning della macchina (anche concluso): ripristina esito/risultati dopo un rimontaggio della pagina"""

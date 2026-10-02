@@ -198,13 +198,21 @@ def _estimate_vram_gb(model_size_gb: float, ctx_size: int,
     return model_size_gb + kv_gb + 1.0     # +1 GB: buffer di calcolo / contesto GPU
 
 
+# [2026-10-02 v1.1.33] Formati della riga KV nei log di llama.cpp (cambiano tra le versioni):
+#   «llama_kv_cache: size = 5440.00 MiB (262144 cells, ...)»            totale (anche «llama_kv_cache_unified:»)
+#   «llama_kv_cache:   ROCm0 KV buffer size = 5440.00 MiB»              per dispositivo
+# Prima era riconosciuto solo il primo: con le build recenti la calibrazione non scattava MAI e la stima predefinita
+# (tarata sull'attenzione piena) scartava tutte le combinazioni (nei modelli ibridi come Qwen3.5 la KV e' molto piu' piccola).
 _KV_RE = re.compile(r"llama_kv_cache\w*:\s*size\s*=\s*([\d.]+)\s*MiB", re.I)
+_KV_DEV_RE = re.compile(r"KV\s+buffer\s+size\s*=\s*([\d.]+)\s*MiB", re.I)
 
 
 def _kv_gb_from_log(executor: Executor, target: Target) -> float:
-    """Somma le righe «llama_kv_cache: size = X MiB» dell'ultimo avvio di llama-server (0 se assenti)."""
+    """GB di KV cache dell'ultimo avvio di llama-server letti dal log (0 se assenti): riga di totale se c'e', altrimenti somma per dispositivo."""
     righe = _log_server_tail(executor, target, 400)
     tot = sum(float(m.group(1)) for ln in righe for m in [_KV_RE.search(ln)] if m)
+    if tot <= 0:
+        tot = sum(float(m.group(1)) for ln in righe for m in [_KV_DEV_RE.search(ln)] if m)
     return round(tot / 1024.0, 3)
 
 
@@ -419,10 +427,11 @@ def _bench_once(executor: Executor, target: Target, ctx_size: int, xlong: bool =
     }
 
 
-def _bench_median(executor: Executor, target: Target, ctx_size: int, xlong: bool = False) -> dict:
+def _bench_median(executor: Executor, target: Target, ctx_size: int, xlong: bool = False, quick: bool = False) -> dict:
     """1 warmup + _BENCH_REPEATS prove ufficiali, per ogni metrica si prende la mediana"""
     _bench_once(executor, target, ctx_size, False)  # warmup, scartato (senza il prompt da 16k: serve solo a scaldare)
-    runs = [_bench_once(executor, target, ctx_size, xlong) for _ in range(_BENCH_REPEATS)]
+    # [2026-10-02 v1.1.33] quick=True (confronto rapido tra motori): 1 sola misura dopo il warmup invece di _BENCH_REPEATS
+    runs = [_bench_once(executor, target, ctx_size, xlong) for _ in range(1 if quick else _BENCH_REPEATS)]
     return {
         "decode": round(median(r["decode"] for r in runs), 2),
         "prefill": round(median(r["prefill"] for r in runs), 2),
@@ -489,6 +498,18 @@ def get_job(job_id: str) -> Optional[dict]:
         return dict(job) if job else None
 
 
+def cancel_job(target_id: str) -> int:
+    """[2026-10-02 v1.1.33] Annulla i tuning in corso della macchina: segna il job; la prova in corso termina (l'API ferma anche il server)
+    e la successiva non parte. Restituisce quanti job sono stati segnati. Prima non c'era modo di fermare un tuning bloccato."""
+    n = 0
+    with _LOCK:
+        for j in _JOBS.values():
+            if j.get("target_id") == target_id and j.get("status") == "running":
+                j["cancel"] = True
+                n += 1
+    return n
+
+
 def get_last_job(target_id: str) -> Optional[dict]:
     """[2026-10-02 v1.1.23] Ultimo tuning (in corso, riuscito o fallito) della macchina: serve a non perdere esito e risultati
     quando la pagina si ricarica o il pannello viene rimontato a fine tuning."""
@@ -525,17 +546,20 @@ def list_active_jobs(target_id: str) -> list:
 
 def _run_one(executor: Executor, target: Target, engine: LlamaCppAdapter,
              model_path: str, cfg: dict, ctx_size: int, job_id: str,
-             tag: str) -> Optional[dict]:
+             tag: str, quick: bool = False) -> Optional[dict]:
     """Avvia un gruppo di configurazione -> misura -> arresto, restituisce il risultato con le metriche; se l'avvio fallisce restituisce None"""
     label = _cfg_label(cfg)
+    with _LOCK:
+        if _JOBS.get(job_id, {}).get("cancel"):
+            raise RuntimeError("Tuning annullato dall'utente")
     _set_progress(job_id, phase=f"{tag}", current=label)
     try:
-        return _run_one_inner(executor, target, engine, model_path, cfg, ctx_size, job_id, tag, label)
+        return _run_one_inner(executor, target, engine, model_path, cfg, ctx_size, job_id, tag, label, quick)
     finally:
         _set_progress(job_id, step=True)
 
 
-def _run_one_inner(executor, target, engine, model_path, cfg, ctx_size, job_id, tag, label):
+def _run_one_inner(executor, target, engine, model_path, cfg, ctx_size, job_id, tag, label, quick=False):
     engine.stop()
     time.sleep(2)
     params = StartParams(model_path=model_path, extra_args=_args_list(cfg, target, ctx_size))
@@ -557,7 +581,7 @@ def _run_one_inner(executor, target, engine, model_path, cfg, ctx_size, job_id, 
         return None
     with _LOCK:
         _goal = _JOBS.get(job_id, {}).get("goal", "")
-    metrics = _bench_median(executor, target, ctx_size, xlong=(_goal == "coding"))   # v1.1.28
+    metrics = _bench_median(executor, target, ctx_size, xlong=(_goal == "coding" and not quick), quick=quick)   # v1.1.28/v1.1.33
     # [2026-10-01 v1.1.18] Calibra la stima della KV cache sul valore reale loggato da llama-server
     try:
         kv = _kv_gb_from_log(executor, target)
@@ -757,6 +781,54 @@ def _try_other_engines(executor, target, model_path, ctx_size, goal, job_id, bes
     return out
 
 
+def _pick_engine(executor, target, model_path, ctx_size, goal, job_id):
+    """[2026-10-02 v1.1.33] Scelta del motore PRIMA del tuning: ogni build GPU installata (ROCm / Vulkan / CUDA) fa un confronto rapido
+    con la STESSA configurazione neutra (q4_0, senza MTP, tutto in GPU), poi tutto il tuning gira solo sul vincitore.
+    Perche': col confronto a fine tuning (v1.1.27) si spendevano 30+ minuti a ottimizzare un motore lento (ROCm 14 t/s contro Vulkan 66 t/s).
+    Build senza GPU visibile (--list-devices vuoto) o che lavorano sulla CPU (0 strati offloadati) sono escluse.
+    Restituisce (target_vincitore, info_build o None)."""
+    from dataclasses import replace
+    from . import installer
+    builds = [b for b in installer.find_llama_installs(executor, target)
+              if any(k in (b.get("backend") or "").lower() for k in ("rocm", "vulkan", "cuda"))]
+    if len(builds) < 2:
+        _append_log(job_id, "[Motori] una sola build GPU installata: nessun confronto da fare")
+        return target, None
+    cfg = _goal_extras(_normalize_cfg("off", "q4_0", "all", CONTINUOUS_GRID["batch-size"][1],
+                                      CONTINUOUS_GRID["ubatch-size"][2], 3), goal)
+    _append_log(job_id, f"[Motori] confronto rapido tra {len(builds)} build GPU (stessa configurazione neutra, una misura ciascuna): "
+                        + ", ".join((b.get("backend") or "?") for b in builds))
+    with _LOCK:
+        _done = _JOBS.get(job_id, {}).get("progress", {}).get("done", 0)
+    _set_progress(job_id, phase="scelta motore", total=_done + len(builds) + 10)
+    best = None
+    for b in builds:
+        nome = b.get("backend", "?")
+        if not b.get("devices"):
+            _append_log(job_id, f"  [motore {nome}] escluso: --list-devices non elenca nessuna GPU (il runtime non vede la scheda)")
+            _set_progress(job_id, step=True)
+            continue
+        t2 = replace(target, engine_path=b["path"])
+        r = _run_one(executor, t2, LlamaCppAdapter(executor, t2), model_path, cfg, ctx_size, job_id, f"motore {nome}", quick=True)
+        if not r:
+            _append_log(job_id, f"  [motore {nome}] non utilizzabile: escluso")
+            continue
+        off = _offload_from_log(executor, t2)
+        if off is not None and off[0] == 0:
+            _append_log(job_id, f"  [motore {nome}] escluso: 0/{off[1]} strati su GPU (lavora sulla CPU)")
+            continue
+        r["score"] = _score(r["metrics"], goal)
+        if best is None or r["score"] > best[0]["score"]:
+            best = (r, b, t2)
+    if not best:
+        _append_log(job_id, "[Motori] nessuna build ha dato una misura valida: resto sul motore in uso")
+        return target, None
+    r, b, t2 = best
+    _append_log(job_id, f"[Motori] vince {b.get('backend', '?').upper()} ({r['metrics']['decode']} t/s in decodifica, punteggio {r['score']}): "
+                        "il tuning prosegue solo su questo motore")
+    return t2, b
+
+
 # ==================== Flusso principale ====================
 
 def start_tune(target_id: str, model: str, ctx_size: int = 8192,
@@ -791,7 +863,7 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
         }
 
     def _worker():
-        nonlocal model_size_gb
+        nonlocal model_size_gb, target   # v1.1.33: target puo' passare alla build vincitrice del confronto motori
         executor = None
         try:
             from .executor import make_executor
@@ -813,6 +885,14 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
             _append_log(job_id, f"VRAM della macchina target: {gpu_vram_gb:.1f} GB | modello: {model} "
                                 f"({model_size_gb:.1f} GB) | ctx fisso {ctx_size} | obiettivo: "
                                 f"{GOAL_LABELS.get(goal, goal)}")
+            # [2026-10-02 v1.1.33] confronto motori PRIMA del tuning (vedi _pick_engine); il vincitore diventa il motore di tutto il tuning
+            engine_switched = False
+            if try_engines:
+                new_target, _b = _pick_engine(executor, target, model_path, ctx_size, goal, job_id)
+                if _b is not None and new_target.engine_path != target.engine_path:
+                    engine_switched = True
+                target = new_target
+                engine = LlamaCppAdapter(executor, target)
             # [2026-10-02 v1.1.24] metadati per lo storico: motore (backend + versione), GPU, dimensione modello
             try:
                 from . import installer, collectors
@@ -893,14 +973,7 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
             cur_eng = _JOBS[job_id].get("meta", {}).get("engine", {})
             for r_ in all_results:
                 r_.setdefault("engine", cur_eng)
-            if try_engines:
-                alt_res = _try_other_engines(executor, target, model_path, ctx_size, goal, job_id, final_best)
-                all_results.extend(alt_res)
-                for r_ in alt_res:
-                    # un altro motore sostituisce la scelta solo se supera la migliore di almeno il 3% (margine di rumore)
-                    if r_["score"] > final_best["score"] * NOISE:
-                        final_best = r_
-                        _append_log(job_id, f"  ✓ Il motore {r_['engine']['backend']} e' piu' veloce: consigliato il cambio di motore")
+            # [2026-10-02 v1.1.33] il confronto tra motori ora avviene PRIMA (_pick_engine); la vecchia fase finale _try_other_engines non e' piu' usata
             _finalize(job_id, all_results, final_best)
         except Exception as e:
             _fail(job_id, str(e))

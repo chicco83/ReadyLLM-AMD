@@ -87,6 +87,12 @@ export default function TuneLiveProgress({ targetId }) {
         <button className="text-xs text-blue underline" onClick={() => setShowLog(v => !v)}>
           {showLog ? t('tune.liveHideLog') : t('tune.liveShowLog')}
         </button>
+        {!done && (
+          <button className="text-xs px-2 py-1 rounded border border-red/60 text-red hover:bg-red/10"
+            onClick={async () => { if (window.confirm(t('tune.liveCancelConfirm'))) await fetch(`/api/tune/cancel?target_id=${targetId}`, { method: 'POST' }) }}>
+            {t('tune.liveCancel')}
+          </button>
+        )}
         {done && (
           <>
             <button className="text-xs px-2 py-1 rounded bg-blue text-bg font-semibold"
