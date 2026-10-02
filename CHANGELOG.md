@@ -1,8 +1,15 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.36** — 2026-10-02 07:20
+Versione corrente: **1.1.37** — 2026-10-02 07:50
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 39. v1.1.37 — 2026-10-02 07:50 — Motori personalizzati (fork RDNA4)
+- Impostazioni → Motori di inferenza: sezione **Aggiungi un motore personalizzato** (nome + percorso di `llama-server.exe`, con Sfoglia per le macchine locali). Il motore compare nell'elenco con il nome scelto.
+- Ogni build dell'elenco ha il pulsante **Usa come motore** (prima solo l'indicazione «In uso»); i motori personalizzati hanno anche **Rimuovi** (il file non viene toccato).
+- `Target.extra_engines` (targets.json), `POST/DELETE /api/target/{id}/extra-engines`, `find_llama_installs` include i motori personalizzati (`custom`, `name`); salvando il modulo delle Impostazioni non si perdono.
+- I motori personalizzati partecipano alla scelta del motore nel tuning (se `--list-devices` elenca la GPU) e compaiono con il nome scelto nei log e nella barra.
+- Nota: il fork `MrLordCat/llama.cpp-rdna-lab` non pubblica binari (solo sorgenti, richiede HIP SDK 7.1/7.2 o driver Vulkan AMD): va compilato dall'utente. Basta indicare il suo `llama-server.exe`. Anche mettendolo sotto `C:\llama\` viene trovato da solo.
 
 ## 38. v1.1.36 — 2026-10-02 07:20 — Grafici del tuning in tempo reale
 - Il pannello «Effetto del tuning» del Monitoraggio, durante un tuning, mostra tre grafici animati (decodifica, prefill, TTFT) con una barra per ogni prova conclusa che si aggiunge man mano, linea tratteggiata della baseline, barra grigia = baseline, verde = migliore finora; sotto il confronto prima/dopo con la migliore finora. Aggiornamento ogni 2 s.

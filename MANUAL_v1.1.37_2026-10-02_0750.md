@@ -158,3 +158,6 @@ Cambiando modello nel Tuning, o avviando un nuovo tuning, i risultati e il confr
 
 ## 36. Grafici in tempo reale (v1.1.36)
 Durante il tuning, «Effetto del tuning» si anima: ogni prova conclusa aggiunge una barra ai grafici di decodifica, prefill e TTFT (tratteggio = baseline, grigio = baseline, verde = migliore finora, blu = altre). Passando il mouse su una barra si vede la prova. Le prove fallite sono contate a parte. A tuning concluso il pannello torna al confronto prima/dopo finale.
+
+## 37. Motori personalizzati (v1.1.37)
+Impostazioni → Motori di inferenza → **Aggiungi un motore personalizzato**: scrivi un nome (es. «Fork RDNA4») e scegli con Sfoglia il suo `llama-server.exe`, poi **Aggiungi motore**. Nell'elenco clicca **Usa come motore** per attivarlo (vale per Deploy e Tuning); **Rimuovi** lo toglie dall'elenco senza cancellare i file. Nel Tuning, con l'opzione «Prova anche gli altri motori», il motore personalizzato entra nella gara rapida tra i motori se vede la GPU. I binari del fork RDNA4 non sono distribuiti: va compilato seguendo la sua guida (HIP SDK 7.1/7.2 o Vulkan).
