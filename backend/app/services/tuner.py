@@ -472,7 +472,7 @@ def _append_log(job_id: str, msg: str):
             job["logs"].append({"t": time.strftime("%H:%M:%S"), "msg": msg})
 
 
-def _set_progress(job_id: str, phase: str = None, total: int = None, step: bool = False, current: str = None):
+def _set_progress(job_id: str, phase: str = None, total: int = None, step: bool = False, current: str = None, engine: dict = None):
     """[2026-10-01 v1.1.19] Avanzamento per la barra di progresso: fase corrente, prove completate e totale stimato.
     Il totale e' una stima (la fase fine converge in modo dinamico): se le prove superano la stima, il totale si allarga."""
     with _LOCK:
@@ -482,6 +482,9 @@ def _set_progress(job_id: str, phase: str = None, total: int = None, step: bool 
         pr = job.setdefault("progress", {"done": 0, "total": 1, "phase": ""})
         if phase is not None:
             pr["phase"] = phase
+        if engine is not None:
+            # [2026-10-02 v1.1.34] motore con cui si sta misurando ORA (cambia durante il confronto tra motori): la barra lo mostra
+            pr["engine"] = {"backend": engine.get("backend", ""), "version": engine.get("version", "")}
         if current is not None:
             pr["current"] = current          # [2026-10-02 v1.1.32] configurazione in prova (mostrata sotto la barra)
         if total is not None:
@@ -809,6 +812,7 @@ def _pick_engine(executor, target, model_path, ctx_size, goal, job_id):
             _set_progress(job_id, step=True)
             continue
         t2 = replace(target, engine_path=b["path"])
+        _set_progress(job_id, engine=b)
         r = _run_one(executor, t2, LlamaCppAdapter(executor, t2), model_path, cfg, ctx_size, job_id, f"motore {nome}", quick=True)
         if not r:
             _append_log(job_id, f"  [motore {nome}] non utilizzabile: escluso")
@@ -824,6 +828,7 @@ def _pick_engine(executor, target, model_path, ctx_size, goal, job_id):
         _append_log(job_id, "[Motori] nessuna build ha dato una misura valida: resto sul motore in uso")
         return target, None
     r, b, t2 = best
+    _set_progress(job_id, engine=b)
     _append_log(job_id, f"[Motori] vince {b.get('backend', '?').upper()} ({r['metrics']['decode']} t/s in decodifica, punteggio {r['score']}): "
                         "il tuning prosegue solo su questo motore")
     return t2, b
@@ -904,6 +909,7 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
                                    "version": ei.get("version", ""), "path": ei.get("path", "")},
                         "gpu": {"name": gi.get("name", ""), "vram_gb": round(gpu_vram_gb, 1)},
                         "model_size_gb": round(model_size_gb, 1)})
+                _set_progress(job_id, engine=_JOBS[job_id]["meta"]["engine"])   # v1.1.34: motore realmente in uso nel tuning
             except Exception:
                 pass
             all_results = []

@@ -74,6 +74,13 @@ export default function TuneLiveProgress({ targetId }) {
   const done = !job
   const failed = done && shown.status === 'failed'
   const pr = shown.progress || { done: 0, total: 1, phase: '' }
+  // [2026-10-02 v1.1.34] Motore mostrato nella barra: quello con cui sta misurando il tuning (cambia durante il confronto tra motori e
+  // dopo la scelta del vincitore); a tuning concluso quello della configurazione consigliata. Fallback: motore configurato (engineInfo).
+  // Versione precedente: sempre e solo engineInfo, letto una volta dalla configurazione della macchina.
+  const eng = done ? shown.best?.engine : pr.engine
+  const engineText = eng && (eng.backend || eng.version)
+    ? [(eng.backend || '').toUpperCase(), eng.version || ''].filter(Boolean).join(' — ')
+    : engineInfo
   const pct = done ? 100 : Math.min(99, Math.round((pr.done / Math.max(pr.total, 1)) * 100))
   const logs = done ? (shown.logs || []).slice(-8) : (shown.last_logs || [])
   const color = failed ? 'bg-red/60' : done ? 'bg-green/60' : 'bg-blue/60'
@@ -103,8 +110,8 @@ export default function TuneLiveProgress({ targetId }) {
       </div>
       <div className="relative h-7 rounded-full bg-bg overflow-hidden">
         <div className={`h-full ${color} transition-all duration-500`} style={{ width: `${pct}%` }} />
-        <div className="absolute inset-0 flex items-center justify-center px-3 text-xs font-semibold text-fg truncate" title={engineInfo}>
-          {engineInfo}
+        <div className="absolute inset-0 flex items-center justify-center px-3 text-xs font-semibold text-fg truncate" title={engineText}>
+          {engineText}
         </div>
       </div>
       {done && (
