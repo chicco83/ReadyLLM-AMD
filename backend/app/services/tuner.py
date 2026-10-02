@@ -513,6 +513,23 @@ def cancel_job(target_id: str) -> int:
     return n
 
 
+def _add_trial(job_id: str, tag: str, label: str, metrics: dict = None, failed: str = ""):
+    """[2026-10-02 v1.1.36] Registra OGNI prova man mano che finisce (anche se fallita): alimenta i grafici in tempo reale del Monitoraggio.
+    Prima i risultati comparivano solo a tuning concluso (job["results"])."""
+    with _LOCK:
+        job = _JOBS.get(job_id)
+        if not job:
+            return
+        goal = job.get("goal", "")
+        eng = job.get("progress", {}).get("engine", {})
+        t = {"n": len(job.setdefault("trials", [])) + 1, "tag": tag, "label": label, "failed": failed,
+             "engine": eng, "ts": time.strftime("%H:%M:%S")}
+        if metrics:
+            t["metrics"] = {k: metrics.get(k, 0) for k in ("decode", "prefill", "prefill_long", "ttft_ms", "gpu_util")}
+            t["score"] = _score(metrics, goal)
+        job["trials"].append(t)
+
+
 def get_last_job(target_id: str) -> Optional[dict]:
     """[2026-10-02 v1.1.23] Ultimo tuning (in corso, riuscito o fallito) della macchina: serve a non perdere esito e risultati
     quando la pagina si ricarica o il pannello viene rimontato a fine tuning."""
@@ -541,6 +558,7 @@ def list_active_jobs(target_id: str) -> list:
                 "last_logs": logs[-8:],
                 "result_count": len(job.get("results", [])),
                 "progress": job.get("progress", {"done": 0, "total": 1, "phase": ""}),
+                "trials": list(job.get("trials", [])),      # v1.1.36: prove gia' concluse, per i grafici in tempo reale
             })
         return out
 
@@ -571,11 +589,13 @@ def _run_one_inner(executor, target, engine, model_path, cfg, ctx_size, job_id, 
     _rec_args(target.id, params.extra_args)
     ok, msg = engine.start(params)
     if not ok:
+        _add_trial(job_id, tag, label, failed="avvio non riuscito")
         _append_log(job_id, f"  [{tag}] {label} avvio non riuscito: {msg}")
         for ln in _log_server_tail(executor, target):
             _append_log(job_id, f"    [llama-server] {ln}")
         return None
     if not _wait_ready(executor, target):
+        _add_trial(job_id, tag, label, failed="timeout di avvio")
         _append_log(job_id, f"  [{tag}] {label} timeout di avvio (forse VRAM insufficiente)")
         # [2026-10-01 v1.1.8] mostra il log di llama-server: indica la causa reale dell'errore
         for ln in _log_server_tail(executor, target):
@@ -596,6 +616,7 @@ def _run_one_inner(executor, target, engine, model_path, cfg, ctx_size, job_id, 
         pass
     engine.stop()
     time.sleep(2)
+    _add_trial(job_id, tag, label, metrics)
     _append_log(job_id, f"  [{tag}] {label} → decodifica {metrics['decode']} t/s, "
                         f"prefill {metrics['prefill']} t/s, GPU {metrics['gpu_util']}%")
     # [2026-10-02 v1.1.32] VRAM quasi piena: su Windows il driver sposta le allocazioni nella memoria condivisa (RAM di sistema) e la

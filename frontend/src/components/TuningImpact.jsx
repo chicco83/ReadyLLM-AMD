@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useI18n } from '../i18n/I18nContext'
 import BeforeAfter from './BeforeAfter'
+import LiveTuning from './LiveTuning'
 
 // [2026-10-02 v1.1.29] Pannello «Effetto del tuning» del Monitoraggio: al posto del grafico dei token per giorno (poco utile) mostra
 // il PRIMA e il DOPO dell'ultimo tuning concluso della macchina (grafico a barre decodifica/prefill/TTFT, motore, parametri)
@@ -19,12 +20,12 @@ export default function TuningImpact({ targetId }) {
     const load = () => fetch(`/api/tune/history?target_id=${targetId}`).then(r => r.json())
       .then(d => setEntries((d.entries || []).filter(e => e.status === 'success'))).catch(() => {})
     const loadRun = () => fetch(`/api/tune/active?target_id=${targetId}`).then(r => r.json())
-      .then(d => { const j = (d.jobs || [])[0]; setRunning(j ? { model: j.model } : null); if (!j) load() }).catch(() => {})
+      .then(d => { const j = (d.jobs || [])[0]; setRunning(j ? j : null); if (!j) load() }).catch(() => {})
     load(); loadRun()
     const onStart = () => { setRunning({ model: '' }); setTimeout(loadRun, 700) }
     window.addEventListener('readyllm:tune-started', onStart)
     const id = setInterval(load, 30000)
-    const id2 = setInterval(loadRun, 3000)
+    const id2 = setInterval(loadRun, 2000)   // v1.1.36: 2 s, i grafici si aggiornano in tempo reale
     return () => { clearInterval(id); clearInterval(id2); window.removeEventListener('readyllm:tune-started', onStart) }
   }, [targetId])
 
@@ -33,13 +34,18 @@ export default function TuningImpact({ targetId }) {
     <div className="bg-card rounded-lg p-4 border border-gray/30 mt-4">
       <div className="text-sm font-semibold mb-1">{t('impact.title')}</div>
       {running ? (
-        <div className="text-sm text-gray py-6">{t('impact.running')}{running.model ? ` — ${short(running.model)}` : ''}</div>
+        <div>
+          {/* [2026-10-02 v1.1.36] durante il tuning: grafici in tempo reale (LiveTuning); prima c'era solo un testo «in corso» */}
+          <div className="text-xs text-gray mb-2">{running.model ? short(running.model) : ''}</div>
+          <LiveTuning job={running} />
+        </div>
       ) : !last ? (
         <div className="text-sm text-gray py-6">{entries === null ? '…' : t('impact.empty')}</div>
       ) : (
         <>
           <div className="text-xs text-gray mb-1 flex flex-wrap gap-x-4">
             <span title={last.model}>{short(last.model)}</span>
+            <span className="px-1.5 rounded bg-gray/20">{t('impact.lastDone')}</span>
             <span>{fmtDate(last.ts_start)}</span>
             <span>{t('history.goal')}: {last.goal}</span>
             {last.gain_pct != null && (
