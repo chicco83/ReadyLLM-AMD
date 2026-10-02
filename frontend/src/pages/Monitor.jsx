@@ -146,6 +146,15 @@ export default function Monitor({ targetId, target }) {
             <div><span className="text-gray">{t('monitor.cpu')}</span> {cpuMem.cpu_pct != null ? `${cpuMem.cpu_pct}%` : '--'}</div>
             <div><span className="text-gray">{t('monitor.memory')}</span> {cpuMem.memory_used_gb != null ? `${cpuMem.memory_used_gb}G / ${cpuMem.memory_total_gb}G` : '--'}</div>
           </div>
+          {/* [2026-10-02 v1.1.38] File di paging e memoria impegnata (commit): spiega le scritture su disco anche con RAM libera */}
+          {cpuMem.pagefile && cpuMem.pagefile.drive && (
+            <div className={`mt-2 text-xs ${cpuMem.pagefile.media === 'HDD' && cpuMem.pagefile.used_gb > 0.5 ? 'text-yellow' : 'text-gray'}`}>
+              {t('monitor.pagefile')}: {cpuMem.pagefile.used_gb}/{cpuMem.pagefile.size_gb} GB {t('monitor.on')} {cpuMem.pagefile.drive}
+              {cpuMem.pagefile.media ? ` (${cpuMem.pagefile.media})` : ''}
+              {cpuMem.pagefile.commit_limit_gb ? ` · ${t('monitor.commit')} ${cpuMem.pagefile.commit_used_gb}/${cpuMem.pagefile.commit_limit_gb} GB` : ''}
+              {cpuMem.pagefile.media === 'HDD' && cpuMem.pagefile.used_gb > 0.5 ? ` ⚠ ${t('monitor.pagefileSlow')}` : ''}
+            </div>
+          )}
           <div className="mt-2 space-y-1">
             <div className="flex items-center gap-2 text-xs">
               <span className="text-gray w-8">CPU</span>

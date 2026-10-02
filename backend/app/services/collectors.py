@@ -365,6 +365,44 @@ def _collect_gpu(executor: Executor, target: Target) -> dict:
 
 # ==================== CPU / Memoria ====================
 
+_PF_CACHE: dict = {}
+
+
+def _pagefile_windows(executor: Executor, target: Target) -> dict:
+    """[2026-10-02 v1.1.38] File di paging di Windows: unita', uso/dimensione/picco in GB, tipo di disco (HDD/SSD) e memoria di commit
+    (impegno di memoria virtuale, la causa per cui Windows scrive nel paging anche con RAM fisica libera: driver GPU, buffer host di
+    ROCm/Vulkan e allocazioni di llama-server contano nel commit). In cache 20 s. Dict vuoto se non disponibile."""
+    import time as _t
+    key = getattr(target, "id", None) or "local"
+    ts, val = _PF_CACHE.get(key, (0, {}))
+    if _t.time() - ts < 20:
+        return val
+    cmd = _ps(
+        "$ErrorActionPreference='SilentlyContinue'; $u=@(Get-CimInstance Win32_PageFileUsage); "
+        "$o=Get-CimInstance Win32_OperatingSystem; "
+        "if($u.Count -gt 0){ $f=$u[0]; $l=$f.Name.Substring(0,1); "
+        "$mt=(Get-Partition -DriveLetter $l | Get-Disk | Get-PhysicalDisk | Select-Object -First 1).MediaType; "
+        "Write-Output ('PFNAME=' + $f.Name); Write-Output ('PFUSED=' + (($u|Measure-Object CurrentUsage -Sum).Sum)); "
+        "Write-Output ('PFSIZE=' + (($u|Measure-Object AllocatedBaseSize -Sum).Sum)); "
+        "Write-Output ('PFPEAK=' + (($u|Measure-Object PeakUsage -Sum).Sum)); Write-Output ('PFMEDIA=' + $mt) }; "
+        "Write-Output ('VMTOTAL=' + $o.TotalVirtualMemorySize); Write-Output ('VMFREE=' + $o.FreeVirtualMemory)")
+    kv = _parse_kv_lines(executor.run(cmd, timeout=25).stdout)
+    out = {}
+    try:
+        if kv.get("PFNAME"):
+            out.update({"drive": kv["PFNAME"][:2], "used_gb": round(float(kv.get("PFUSED") or 0) / 1024, 2),
+                        "size_gb": round(float(kv.get("PFSIZE") or 0) / 1024, 2),
+                        "peak_gb": round(float(kv.get("PFPEAK") or 0) / 1024, 2),
+                        "media": (kv.get("PFMEDIA") or "").strip()})
+        vt, vf = float(kv.get("VMTOTAL") or 0), float(kv.get("VMFREE") or 0)
+        if vt > 0:
+            out.update({"commit_used_gb": round((vt - vf) / 1048576, 1), "commit_limit_gb": round(vt / 1048576, 1)})
+    except ValueError:
+        out = {}
+    _PF_CACHE[key] = (_t.time(), out)
+    return out
+
+
 def _collect_cpu_mem(executor: Executor, target: Target) -> dict:
     if target.os == "windows":
         cmd = _ps(
@@ -385,6 +423,8 @@ def _collect_cpu_mem(executor: Executor, target: Target) -> dict:
                     "memory_used_gb": round((total - free) / 1024 / 1024, 1),
                     "memory_total_gb": round(total / 1024 / 1024, 1),
                     "memory_pct": round((total - free) / total * 100, 1),
+                    # [2026-10-02 v1.1.38] paging e commit (vedi _pagefile_windows)
+                    "pagefile": _pagefile_windows(executor, target),
                 }
         except ValueError:
             pass

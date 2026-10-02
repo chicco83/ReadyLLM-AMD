@@ -19,6 +19,10 @@ export const translations = {
     'app.goSettings': 'Go to Settings',
 
     // ===== Monitor =====
+    'monitor.pagefile': 'Paging file',
+    'monitor.on': 'on',
+    'monitor.commit': 'Committed memory',
+    'monitor.pagefileSlow': 'slow disk: move the paging file to an SSD',
     'monitor.title': 'Real-time Monitor',
     'monitor.connected': 'Connected',
     'monitor.disconnected': 'Disconnected',
@@ -457,6 +461,10 @@ export const translations = {
     'app.noTarget': 'Nessuna macchina target configurata',
     'app.noTargetHint': 'Aggiungi la macchina su cui vuoi fare deploy / monitoraggio. Può essere questo computer o un altro della tua rete locale.',
     'app.goSettings': 'Vai alle Impostazioni',
+    'monitor.pagefile': 'File di paging',
+    'monitor.on': 'su',
+    'monitor.commit': 'Memoria impegnata',
+    'monitor.pagefileSlow': 'disco lento: sposta il paging su un SSD',
     'monitor.title': 'Monitoraggio in tempo reale',
     'monitor.connected': 'Connesso',
     'monitor.disconnected': 'Disconnesso',
@@ -850,6 +858,10 @@ export const translations = {
     'app.goSettings': '前往设置',
 
     // ===== Monitor =====
+    'monitor.pagefile': '分页文件',
+    'monitor.on': '位于',
+    'monitor.commit': '已提交内存',
+    'monitor.pagefileSlow': '磁盘较慢:请把分页文件移到 SSD',
     'monitor.title': '实时监控',
     'monitor.connected': '已连接',
     'monitor.disconnected': '未连接',

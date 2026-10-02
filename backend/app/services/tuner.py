@@ -913,6 +913,18 @@ def start_tune(target_id: str, model: str, ctx_size: int = 8192,
             _append_log(job_id, f"VRAM della macchina target: {gpu_vram_gb:.1f} GB | modello: {model} "
                                 f"({model_size_gb:.1f} GB) | ctx fisso {ctx_size} | obiettivo: "
                                 f"{GOAL_LABELS.get(goal, goal)}")
+            # [2026-10-02 v1.1.38] File di paging su un disco lento (HDD): durante le prove le scritture sul paging rallentano tutto
+            # (visto: disco E: a piatti al 100% con RAM libera). Si avvisa subito, con il rimedio.
+            try:
+                if target.os == "windows":
+                    from .collectors import _pagefile_windows
+                    pf = _pagefile_windows(executor, target)
+                    if pf.get("drive") and (pf.get("media", "").upper() == "HDD"):
+                        _append_log(job_id, f"⚠ Il file di paging di Windows e' su {pf['drive']} (disco a piatti, HDD): se la memoria impegnata cresce "
+                                            f"(picco paging {pf.get('peak_gb', 0)} GB) le prove rallentano. Sposta il paging su un SSD "
+                                            "(Sistema → Impostazioni avanzate → Prestazioni → Memoria virtuale)")
+            except Exception:
+                pass
             # [2026-10-02 v1.1.33] confronto motori PRIMA del tuning (vedi _pick_engine); il vincitore diventa il motore di tutto il tuning
             engine_switched = False
             if try_engines:
