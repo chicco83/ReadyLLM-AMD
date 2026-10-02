@@ -161,3 +161,6 @@ Durante il tuning, «Effetto del tuning» si anima: ogni prova conclusa aggiunge
 
 ## 37. Motori personalizzati (v1.1.37)
 Impostazioni → Motori di inferenza → **Aggiungi un motore personalizzato**: scrivi un nome (es. «Fork RDNA4») e scegli con Sfoglia il suo `llama-server.exe`, poi **Aggiungi motore**. Nell'elenco clicca **Usa come motore** per attivarlo (vale per Deploy e Tuning); **Rimuovi** lo toglie dall'elenco senza cancellare i file. Nel Tuning, con l'opzione «Prova anche gli altri motori», il motore personalizzato entra nella gara rapida tra i motori se vede la GPU. I binari del fork RDNA4 non sono distribuiti: va compilato seguendo la sua guida (HIP SDK 7.1/7.2 o Vulkan).
+
+## 38. Paging di Windows e dischi lenti (v1.1.38)
+Se durante i test il disco e' al 100% pur con RAM libera, guarda la riga «File di paging» nella scheda CPU/Memoria del Monitoraggio. Il paging dipende dalla memoria impegnata (commit), non da quella fisica usata. Rimedi: spostare il paging su un SSD (Sistema → Impostazioni di sistema avanzate → Prestazioni → Avanzate → Memoria virtuale: togli il file da E:, lascia «gestito dal sistema» su C:), ridurre il contesto o la KV cache (meno VRAM e meno memoria host impegnata), oppure scegliere un modello piu' piccolo. Il tuning avvisa all'inizio se il paging e' su un HDD.

@@ -146,3 +146,5 @@ Rimossa da `EngineRow` la sezione «Build installate / Attiva / Installa»; spos
 - v1.1.36: `tuner._add_trial` (job['trials']), `list_active_jobs` con `trials`; `LiveTuning.jsx` (Recharts) usato da `TuningImpact`.
 
 - v1.1.37: `Target.extra_engines`, endpoint `/extra-engines`, `find_llama_installs` (custom/name), `EngineRow` con aggiunta/uso/rimozione, `_pick_engine` con nome personalizzato, `create_target` e `upsert_target` preservano gli extra.
+
+- v1.1.38: `collectors._pagefile_windows` (Win32_PageFileUsage + Get-PhysicalDisk MediaType + commit da Win32_OperatingSystem), `cpu_mem.pagefile`, riga in Monitor, avviso nel worker del tuner.

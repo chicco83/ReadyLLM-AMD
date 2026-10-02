@@ -1,8 +1,14 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.37** — 2026-10-02 07:50
+Versione corrente: **1.1.38** — 2026-10-02 08:20
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 40. v1.1.38 — 2026-10-02 08:20 — Paging di Windows visibile
+- Causa delle scritture al 100% sul disco E: (vecchio disco a piatti) durante i test: il **file di paging di Windows** era su E:. Windows scrive nel paging in base alla memoria *impegnata* (commit: driver GPU, buffer host di ROCm/Vulkan, allocazioni di llama-server), anche con RAM fisica libera.
+- Monitoraggio, scheda CPU/Memoria: riga «File di paging: uso/dimensione GB su <unita'> (HDD/SSD) · Memoria impegnata X/Y GB», in giallo con avviso se il paging e' su HDD e in uso.
+- Tuning: a inizio prova avviso nel log se il paging e' su un HDD.
+- Backend: `collectors._pagefile_windows` (cache 20 s) dentro `cpu_mem.pagefile`.
 
 ## 39. v1.1.37 — 2026-10-02 07:50 — Motori personalizzati (fork RDNA4)
 - Impostazioni → Motori di inferenza: sezione **Aggiungi un motore personalizzato** (nome + percorso di `llama-server.exe`, con Sfoglia per le macchine locali). Il motore compare nell'elenco con il nome scelto.
