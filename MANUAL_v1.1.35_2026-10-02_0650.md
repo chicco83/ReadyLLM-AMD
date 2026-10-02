@@ -152,3 +152,6 @@ Con 2+ build GPU installate e l'opzione «Prova anche gli altri motori» il tuni
 
 ## 34. Motore nella barra (v1.1.34)
 Il nome al centro della barra di progresso e' il motore usato dal tuning in quel momento; segue il confronto tra motori e, alla fine, indica quello consigliato.
+
+## 35. Risultati e cambio modello (v1.1.35)
+Cambiando modello nel Tuning, o avviando un nuovo tuning, i risultati e il confronto prima/dopo precedenti spariscono; durante il tuning il pannello «Effetto del tuning» indica che e' in corso e mostra il nuovo confronto alla fine.

@@ -1,8 +1,12 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.34** — 2026-10-02 06:35
+Versione corrente: **1.1.35** — 2026-10-02 06:50
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 37. v1.1.35 — 2026-10-02 06:50 — Prima/dopo azzerato con un nuovo tuning
+- Tuning: scegliendo un altro modello si azzerano esito, confronto prima/dopo e «Salva e applica» del modello precedente (potevano essere applicati al modello sbagliato).
+- All'avvio di un nuovo tuning (evento `readyllm:tune-started`) la barra di progresso toglie subito lo stato finale del precedente e il pannello «Effetto del tuning» del Monitoraggio mostra «Tuning in corso…» invece del confronto vecchio.
 
 ## 36. v1.1.34 — 2026-10-02 06:35 — Motore corretto nella barra di progresso
 - La barra mostra il motore con cui il tuning sta misurando in quel momento (campo `progress.engine`): cambia durante il confronto tra motori e dopo la scelta del vincitore; a tuning concluso mostra il motore della configurazione consigliata. Prima era letto una volta sola dalla configurazione della macchina (restava «ROCM» anche con il tuning su Vulkan).
