@@ -46,6 +46,7 @@ class TargetRequest(BaseModel):
     service_port: int = 8080
     id: Optional[str] = None
     name: str = "Locale"
+    extra_engines: Optional[list] = None   # [2026-10-02 v1.1.37] None = mantieni quelli gia' salvati (gestiti da /extra-engines)
 
 
 @router.get("")
@@ -60,7 +61,11 @@ def create_target(req: TargetRequest):
     data = req.model_dump()
     if not data.get("id"):
         data.pop("id", None)
+    extra = data.pop("extra_engines", None)
     target = Target(**data)
+    # [2026-10-02 v1.1.37] salvando il modulo non si perdono i motori personalizzati gia' registrati
+    existing = get_target(target.id) if data.get("id") else None
+    target.extra_engines = extra if extra is not None else (existing.extra_engines if existing else [])
     # [2026-10-01 v1.1.0] match_identity=True: evita duplicati se manca l'id (bug targets.json)
     targets = upsert_target(target, match_identity=True)
     return {"ok": True, "id": target.id, "targets": [t.to_dict() for t in targets]}
@@ -79,6 +84,7 @@ def test_connection(req: TargetRequest):
     data = req.model_dump()
     data.pop("id", None)
     data.pop("name", None)
+    data.pop("extra_engines", None)
     target = Target(**data)
     executor = make_executor(target)
     try:
@@ -124,6 +130,45 @@ def activate_engine(target_id: str, req: ActivateRequest):
         target.engine_path = req.path
     if req.llama_backend:
         target.llama_backend = req.llama_backend
+    targets = upsert_target(target)
+    return {"ok": True, "targets": [t.to_dict() for t in targets]}
+
+
+class ExtraEngineRequest(BaseModel):
+    name: str = "Motore personalizzato"
+    path: str
+
+
+@router.post("/{target_id}/extra-engines")
+def add_extra_engine(target_id: str, req: ExtraEngineRequest):
+    """[2026-10-02 v1.1.37] Registra un llama-server personalizzato (es. fork RDNA4 compilato a mano). Verifica che il file esista."""
+    target = get_target(target_id)
+    if not target:
+        return {"ok": False, "message": "Macchina target inesistente"}
+    path = (req.path or "").strip().strip('"')
+    if not path:
+        return {"ok": False, "message": "Percorso vuoto"}
+    executor = make_executor(target)
+    try:
+        r = executor.run(f'if exist "{path}" (echo FOUND)' if target.os == "windows" else f'test -f "{path}" && echo FOUND', timeout=10)
+    finally:
+        executor.close()
+    if "FOUND" not in (r.stdout or ""):
+        return {"ok": False, "message": f"File non trovato: {path}"}
+    extra = [e for e in (target.extra_engines or []) if (e.get("path") or "").lower() != path.lower()]
+    extra.append({"name": (req.name or "Motore personalizzato").strip(), "path": path})
+    target.extra_engines = extra
+    targets = upsert_target(target)
+    return {"ok": True, "targets": [t.to_dict() for t in targets]}
+
+
+@router.delete("/{target_id}/extra-engines")
+def remove_extra_engine(target_id: str, path: str):
+    """Toglie un motore personalizzato dall'elenco (il file non viene cancellato)"""
+    target = get_target(target_id)
+    if not target:
+        return {"ok": False, "message": "Macchina target inesistente"}
+    target.extra_engines = [e for e in (target.extra_engines or []) if (e.get("path") or "").lower() != path.lower()]
     targets = upsert_target(target)
     return {"ok": True, "targets": [t.to_dict() for t in targets]}
 

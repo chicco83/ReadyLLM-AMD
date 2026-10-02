@@ -132,6 +132,17 @@ def find_llama_installs(executor: Executor, target: Target) -> list:
         paths += [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip().endswith("llama-server")]
     cur = (target.engine_path or "").strip()
     norm = lambda p: p.replace("/", "\\").lower() if target.os == "windows" else p
+    # [2026-10-02 v1.1.37] motori personalizzati registrati dall'utente (extra_engines): si includono se il file esiste
+    custom = {}
+    for ee in (getattr(target, "extra_engines", None) or []):
+        ep = (ee.get("path") or "").strip()
+        if not ep:
+            continue
+        ok_ = executor.run(f'if exist "{ep}" (echo FOUND)' if target.os == "windows" else f'test -f "{ep}" && echo FOUND', timeout=8)
+        if "FOUND" in (ok_.stdout or ""):
+            custom[norm(ep)] = ee.get("name") or "Personalizzato"
+            if norm(ep) not in [norm(p) for p in paths]:
+                paths.append(ep)
     if cur and norm(cur) not in [norm(p) for p in paths]:
         exists = executor.run(
             f'if exist "{cur}" (echo FOUND)' if target.os == "windows" else f'test -f "{cur}" && echo FOUND', timeout=8)
@@ -149,7 +160,8 @@ def find_llama_installs(executor: Executor, target: Target) -> list:
         vr = executor.run(f'"{p}" --version 2>&1', timeout=20)
         ver = next((ln.strip() for ln in (vr.stdout or "").splitlines() if "version" in ln.lower()), "")
         out.append({"path": p, "backend": info["backend"], "devices": info["devices"], "version": ver,
-                    "active": bool(cur) and norm(p) == norm(cur)})
+                    "active": bool(cur) and norm(p) == norm(cur),
+                    "custom": norm(p) in custom, "name": custom.get(norm(p), "")})
     return out
 
 

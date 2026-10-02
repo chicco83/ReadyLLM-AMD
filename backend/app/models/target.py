@@ -45,6 +45,10 @@ class Target:
     #   vllm:      comando vllm (dopo l'installazione con pip di solito e' gia' nel PATH, si puo' lasciare vuoto per il default)
     engine_path: str = ""
 
+    # [2026-10-02 v1.1.37] Motori llama-server aggiuntivi scelti dall'utente (es. fork RDNA4 compilato a mano): [{"name": ..., "path": ...}].
+    # Compaiono nell'elenco dei motori, si possono mettere in uso e partecipano al confronto tra motori del tuning.
+    extra_engines: list = field(default_factory=list)
+
     # Cartella dei modelli (dove stanno i .gguf)
     models_dir: str = ""
 
@@ -146,6 +150,9 @@ def upsert_target(target: Target, match_identity: bool = False) -> list[Target]:
             target.id = targets[idx].id  # mantiene l'id esistente (usato da running_models, ecc.)
     if idx >= 0:
         # La password non e' persistita: se il client non la invia, nulla da preservare.
+        # [2026-10-02 v1.1.37] i motori personalizzati gia' registrati non si perdono se la nuova entry non li porta (match per identita')
+        if not target.extra_engines and targets[idx].extra_engines:
+            target.extra_engines = targets[idx].extra_engines
         targets[idx] = target
     else:
         targets.append(target)

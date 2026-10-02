@@ -243,7 +243,8 @@ export default function Settings({ targets, onSaved, onChanged }) {
     const res = await fetch('/api/target', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(form),
+      // [2026-10-02 v1.1.37] extra_engines si gestisce con /extra-engines: non si rimanda dal modulo (evita di sovrascrivere con una copia vecchia)
+      body: JSON.stringify((({ extra_engines, ...rest }) => rest)(form)),
     })
     const d = await res.json()
     if (d.ok) {
@@ -556,7 +557,35 @@ function EngineRow({ target, onChanged }) {
   const [showLogs, setShowLogs] = useState(false)
   // [2026-10-01 v1.1.19] tutte le build di llama-server installate (Vulkan, ROCm, ...), non solo quella in uso
   const [builds, setBuilds] = useState([])
+  // [2026-10-02 v1.1.37] motori personalizzati (es. fork RDNA4 compilato a mano): aggiunta, uso come motore, rimozione
+  const [newEng, setNewEng] = useState({ name: 'Fork RDNA4', path: '' })
+  const [engMsg, setEngMsg] = useState('')
   const pollRef = useRef(null)
+
+  async function browseEngine() {
+    try {
+      const d = await (await fetch('/api/target/pick', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind: 'file', title: t('settings.pickEngine') }) })).json()
+      if (d.ok && d.path) setNewEng(e => ({ ...e, path: d.path }))
+      else if (!d.ok) setEngMsg(d.message || '')
+    } catch (e) { setEngMsg(String(e)) }
+  }
+  async function addEngine() {
+    setEngMsg('')
+    const d = await (await fetch(`/api/target/${target.id}/extra-engines`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newEng) })).json()
+    if (!d.ok) { setEngMsg(d.message || t('settings.installFail')); return }
+    setNewEng(e => ({ ...e, path: '' })); if (onChanged) onChanged(); check()
+  }
+  async function useEngine(path) {
+    const d = await (await fetch(`/api/target/${target.id}/activate-engine`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }) })).json()
+    if (d.ok) { if (onChanged) onChanged(); check() }
+  }
+  async function removeEngine(path) {
+    await fetch(`/api/target/${target.id}/extra-engines?path=${encodeURIComponent(path)}`, { method: 'DELETE' })
+    if (onChanged) onChanged(); check()
+  }
 
   async function check() {
     setState('checking')
@@ -673,14 +702,39 @@ function EngineRow({ target, onChanged }) {
             <div key={b.path} className="flex items-start gap-3 text-xs">
               <span className="px-2 py-0.5 rounded bg-purple/15 text-purple font-semibold uppercase shrink-0">{b.backend || 'cpu'}</span>
               <div className="flex-1 min-w-0">
+                {b.custom && <div className="text-yellow font-semibold">{b.name}</div>}
                 {b.version && <div className="text-green">{b.version}</div>}
                 <div className="truncate text-gray/70" title={b.path}>{b.path}</div>
                 {(b.devices || []).map((d, i) => <div key={i} className="text-gray/60">{d}</div>)}
                 {(!b.devices || b.devices.length === 0) && (b.backend || '') !== 'cpu' && <div className="text-red">{t('settings.noGpuShort')}</div>}
               </div>
-              {b.active && <span className="px-2 py-1 rounded bg-green/20 text-green font-semibold shrink-0">{t('settings.inUse')}</span>}
+              {b.active
+                ? <span className="px-2 py-1 rounded bg-green/20 text-green font-semibold shrink-0">{t('settings.inUse')}</span>
+                : <button className="px-2 py-1 rounded bg-blue text-bg font-semibold shrink-0 hover:opacity-90" onClick={() => useEngine(b.path)}>{t('settings.useEngine')}</button>}
+              {b.custom && <button className="px-2 py-1 rounded border border-red/50 text-red shrink-0 hover:bg-red/10" onClick={() => removeEngine(b.path)}>{t('settings.removeEngine')}</button>}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* [2026-10-02 v1.1.37] Aggiungi un motore personalizzato (es. fork RDNA4 compilato a mano): compare nell'elenco, si mette in uso
+          con «Usa come motore» e partecipa al confronto tra motori del tuning. */}
+      {target.engine_type === 'llama_cpp' && (
+        <div className="mt-3 pt-3 border-t border-gray/20">
+          <div className="text-xs font-semibold mb-1">{t('settings.addEngine')}</div>
+          <div className="text-xs text-gray mb-2">{t('settings.addEngineHint')}</div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <input value={newEng.name} onChange={e => setNewEng({ ...newEng, name: e.target.value })} placeholder={t('settings.engineName')}
+              className="bg-bg border border-gray/30 rounded-lg px-3 py-1.5 text-sm w-44" />
+            <input value={newEng.path} onChange={e => setNewEng({ ...newEng, path: e.target.value })} placeholder="C:\llama\fork-rdna4\llama-server.exe"
+              className="bg-bg border border-gray/30 rounded-lg px-3 py-1.5 text-sm flex-1 min-w-[16rem]" />
+            {target.conn_type !== 'ssh' && (
+              <button onClick={browseEngine} className="px-3 py-1.5 rounded-lg border border-gray/40 text-sm hover:bg-white/5">{t('settings.browse')}</button>
+            )}
+            <button onClick={addEngine} disabled={!newEng.path.trim()}
+              className="px-4 py-1.5 rounded-lg bg-blue text-bg text-sm font-semibold disabled:opacity-40 hover:opacity-90">{t('settings.addEngineBtn')}</button>
+          </div>
+          {engMsg && <div className="mt-2 text-xs text-red">{engMsg}</div>}
         </div>
       )}
 

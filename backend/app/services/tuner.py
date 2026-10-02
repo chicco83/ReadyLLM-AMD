@@ -827,7 +827,9 @@ def _pick_engine(executor, target, model_path, ctx_size, goal, job_id):
     _set_progress(job_id, phase="scelta motore", total=_done + len(builds) + 10)
     best = None
     for b in builds:
-        nome = b.get("backend", "?")
+        # [2026-10-02 v1.1.37] i motori personalizzati (es. «Fork RDNA4») si mostrano con il nome scelto dall'utente
+        nome = (f"{b['name']} ({b.get('backend', '?')})" if b.get("custom") and b.get("name") else b.get("backend", "?"))
+        b = dict(b, backend=nome)
         if not b.get("devices"):
             _append_log(job_id, f"  [motore {nome}] escluso: --list-devices non elenca nessuna GPU (il runtime non vede la scheda)")
             _set_progress(job_id, step=True)
