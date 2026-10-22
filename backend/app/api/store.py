@@ -8,7 +8,10 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from typing import Optional
 
-from ..services.model_catalog import list_all, filter_by_vram, get_by_id, fetch_dynamic_catalog
+from ..services.model_catalog import (
+    list_all, filter_by_vram, get_by_id, fetch_dynamic_catalog,
+    list_for_store, get_image_by_id,
+)
 from ..services import downloader
 from ..models.target import get_target
 from ..services.executor import make_executor
@@ -28,9 +31,14 @@ def active_jobs(target_id: Optional[str] = None):
 @router.get("/models")
 def models(target_id: Optional[str] = None, source: str = "hf-mirror",
            category: Optional[str] = None):
-    """Elenco dei modelli; category=text/video filtra per categoria; dato target_id indica in base alla VRAM
-    di quella macchina se il modello puo' girare, source sceglie la sorgente di download"""
-    items = list_all(source, category)
+    """Elenco dei modelli; category=text/image/video filtra per categoria (assente o all = tutti); dato target_id indica in base alla
+    VRAM di quella macchina se il modello puo' girare, source sceglie la sorgente di download.
+
+    I campi category / engine / loader di ogni voce servono al frontend per il filtro per tipo e per i badge.
+    [2026-10-22 v1.1.39] Dal progetto originale (htobty/ReadyLLM, 21aed3b): ora anche i modelli immagine.
+    Versione precedente: items = list_all(source, category)  (solo testo/video)
+    """
+    items = list_for_store(source, category)
     if target_id:
         target = get_target(target_id)
         vram = 0.0
@@ -48,8 +56,13 @@ def models(target_id: Optional[str] = None, source: str = "hf-mirror",
             finally:
                 executor.close()
         for it in items:
-            it["fits"] = it["min_vram_gb"] <= vram if vram > 0 else None
-    return {"models": items}
+            min_vram = it.get("min_vram_gb") or 0
+            it["fits"] = min_vram <= vram if vram > 0 else None
+    counts = {}
+    for it in items:
+        c = it.get("category") or "text"
+        counts[c] = counts.get(c, 0) + 1
+    return {"models": items, "counts": counts, "count": len(items)}
 
 
 @router.get("/refresh")
@@ -74,7 +87,25 @@ class DownloadRequest(BaseModel):
 
 @router.post("/download")
 def download(req: DownloadRequest):
-    """Avvia il task di download (source sceglie la sorgente; se ModelScope non ha il repository corrispondente si ripiega automaticamente sul mirror)"""
+    """Avvia il task di download (source sceglie la sorgente; se ModelScope non ha il repository corrispondente si ripiega automaticamente sul mirror)
+
+    [2026-10-22 v1.1.39] I modelli immagine sono a tre file unet/clip/vae, in cartelle diverse (diffusion_models / text_encoders / vae):
+    non si possono scaricare come un singolo GGUF, quindi qui si rifiuta con una spiegazione, per evitare un «clic senza effetto» o file
+    scaricati nella cartella sbagliata.
+    """
+    if req.model_id.startswith("img-"):
+        entry = get_image_by_id(req.model_id)
+        repo = (entry or {}).get("repo") or "il repository HuggingFace corrispondente"
+        return {
+            "ok": False,
+            "code": "image_model_manual",
+            "repo": repo,
+            "message": (
+                f"I modelli immagine richiedono tre file unet/clip/vae: installarli da ComfyUI "
+                f"(cerca il modello in ComfyUI Manager, oppure scaricalo da {repo} e mettilo nelle cartelle "
+                f"diffusion_models / text_encoders / vae)."
+            ),
+        }
     return downloader.start_download(req.target_id, req.model_id, req.source)
 
 

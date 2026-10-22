@@ -316,3 +316,273 @@ def filter_by_vram(vram_gb: float, source: str = DEFAULT_SOURCE,
     return [m.to_dict(source) for m in CATALOG
             if m.min_vram_gb <= vram_gb
             and (category is None or m.category == category)]
+
+
+
+# ---------------------------------------------------------------------------
+# Elenco selezionato dei modelli immagine [2026-10-22 v1.1.39, dal progetto originale htobty/ReadyLLM, 21aed3b; commenti in italiano]
+#
+# I modelli immagine hanno un layout su disco diverso da testo/video: i modelli testuali sono un singolo file GGUF, quelli video un singolo
+# safetensors, mentre quelli immagine si dividono spesso in tre parti unet/clip/vae. Per questo qui c'e' un elenco di dict a parte, con
+# campi allineati alla ModelCard del frontend e in piu' l'informazione loader (checkpoint / unet): in download il loader decide la cartella.
+# ---------------------------------------------------------------------------
+IMAGE_MODELS: List[dict] = [
+    {
+        "id": "img-qwen-image",
+        "name": "Qwen-Image",
+        "quant": "BF16",
+        "desc": "Modello di generazione di immagini di Alibaba Qwen: ottimo rendering di testo bilingue cinese/inglese, adatto a poster, immagini con scritte e foto realistiche.",
+        "size_gb": 41.0,
+        "min_vram_gb": 20.0,
+        "filename": "qwen_image_2.1_int8_convrot.safetensors",
+        "loader": "unet",
+        "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
+        "vae_name": "qwen_image_2.1_vae_bf16.safetensors",
+        "category": "image",
+        "engine": "comfyui",
+        "repo": "Qwen/Qwen-Image",
+        "tags": ["image", "qwen", "t2i", "text-render"],
+        "available_sources": ["hf-mirror", "modelscope", "huggingface"],
+        "steps": 20,
+        "cfg": 2.5,
+    },
+    {
+        "id": "img-flux-dev",
+        "name": "FLUX.1-dev",
+        "quant": "BF16",
+        "desc": "Modello rectified-flow da 12B di Black Forest Labs: la migliore composizione e fedelta' al prompt, adatto a concept art e ritratti realistici.",
+        "size_gb": 23.8,
+        "min_vram_gb": 16.0,
+        "filename": "flux1-dev.safetensors",
+        "loader": "unet",
+        "clip_name": "t5xxl_fp16.safetensors",
+        "vae_name": "ae.safetensors",
+        "category": "image",
+        "engine": "comfyui",
+        "repo": "black-forest-labs/FLUX.1-dev",
+        "tags": ["image", "flux", "t2i"],
+        "available_sources": ["hf-mirror", "huggingface"],
+        "steps": 25,
+        "cfg": 3.5,
+    },
+    {
+        "id": "img-flux-schnell",
+        "name": "FLUX.1-schnell",
+        "quant": "BF16",
+        "desc": "Versione distillata di FLUX: immagini in 4 passi, cinque-sei volte piu' veloce di dev, adatta a bozze in serie.",
+        "size_gb": 23.8,
+        "min_vram_gb": 12.0,
+        "filename": "flux1-schnell.safetensors",
+        "loader": "unet",
+        "clip_name": "t5xxl_fp16.safetensors",
+        "vae_name": "ae.safetensors",
+        "category": "image",
+        "engine": "comfyui",
+        "repo": "black-forest-labs/FLUX.1-schnell",
+        "tags": ["image", "flux", "fast", "t2i"],
+        "available_sources": ["hf-mirror", "huggingface"],
+        "steps": 4,
+        "cfg": 1.0,
+    },
+    {
+        "id": "img-realvisxl-v4",
+        "name": "RealVisXL V4.0",
+        "quant": "BF16",
+        "desc": "Checkpoint realistico basato su SDXL: ottimi ritratti e resa della pelle, caricamento piu' rapido (file unico).",
+        "size_gb": 6.5,
+        "min_vram_gb": 8.0,
+        "filename": "RealVisXL_V4.0.safetensors",
+        "loader": "checkpoint",
+        "category": "image",
+        "engine": "comfyui",
+        "repo": "SG161222/RealVisXL_V4.0",
+        "tags": ["image", "sdxl", "realistic", "checkpoint"],
+        "available_sources": ["hf-mirror", "huggingface"],
+        "steps": 30,
+        "cfg": 5.0,
+    },
+    {
+        "id": "img-sdxl-base",
+        "name": "SDXL Base 1.0",
+        "quant": "BF16",
+        "desc": "Modello base SDXL di Stability: l'ecosistema con piu' LoRA e ControlNet, gira con 8 GB di VRAM.",
+        "size_gb": 6.9,
+        "min_vram_gb": 8.0,
+        "filename": "sd_xl_base_1.0.safetensors",
+        "loader": "checkpoint",
+        "category": "image",
+        "engine": "comfyui",
+        "repo": "stabilityai/stable-diffusion-xl-base-1.0",
+        "tags": ["image", "sdxl", "base", "checkpoint"],
+        "available_sources": ["hf-mirror", "huggingface"],
+        "steps": 30,
+        "cfg": 7.0,
+    },
+    {
+        "id": "img-sd35-large",
+        "name": "SD 3.5 Large",
+        "quant": "BF16",
+        "desc": "Nuovo MMDiT di Stability, 8B di parametri: impaginazione del testo e prompt complessi piu' stabili di SDXL.",
+        "size_gb": 16.0,
+        "min_vram_gb": 16.0,
+        "filename": "sd3.5_large.safetensors",
+        "loader": "unet",
+        "clip_name": "clip_l.safetensors",
+        "vae_name": "sd3.5_vae.safetensors",
+        "category": "image",
+        "engine": "comfyui",
+        "repo": "stabilityai/stable-diffusion-3.5-large",
+        "tags": ["image", "sd3.5", "t2i"],
+        "available_sources": ["hf-mirror", "huggingface"],
+        "steps": 28,
+        "cfg": 4.5,
+    },
+]
+
+
+# Specifiche aggiuntive dei modelli immagine.
+# I campi tecnici delle voci (filename / loader / steps / cfg) servono a download e a costruire il grafo di ComfyUI: dal solo name non si capisce
+# «quale versione, quanto grande, che immagini produce». Versione, numero di parametri, risoluzione consigliata e precisione reale dei
+# pesi sono quindi elencati a parte e uniti da list_images alle voci.
+# La precisione e' quella dell'effettivo suffisso del filename: qwen_image_2.1_int8_convrot e' INT8, non BF16.
+IMAGE_META: dict = {
+    "img-qwen-image": {
+        "version": "2.1",
+        "params": "20B",
+        "precision": "INT8 conv-rot",
+        "resolution": "1024×1024, supporta anche 1328×1328 e altri rapporti",
+    },
+    "img-flux-dev": {
+        "version": "1.0-dev",
+        "params": "12B",
+        "precision": "BF16",
+        "resolution": "1024×1024, supporta piu' rapporti",
+    },
+    "img-flux-schnell": {
+        "version": "1.0-schnell",
+        "params": "12B",
+        "precision": "BF16",
+        "resolution": "1024×1024, supporta piu' rapporti",
+    },
+    "img-realvisxl-v4": {
+        "version": "V4.0",
+        "params": "3.5B (architettura SDXL)",
+        "precision": "BF16",
+        "resolution": "1024×1024",
+    },
+    "img-sdxl-base": {
+        "version": "1.0",
+        "params": "3.5B",
+        "precision": "BF16",
+        "resolution": "1024×1024",
+    },
+    "img-sd35-large": {
+        "version": "3.5 Large",
+        "params": "8B",
+        "precision": "BF16",
+        "resolution": "1024×1024, supporta piu' rapporti",
+    },
+}
+
+# Descrizioni dei modelli in inglese (id -> desc_en).
+# Il desc delle voci e' scritto fisso nel catalogo (in italiano nel nostro fork; nell'originale in cinese): con l'interfaccia in inglese
+# comparirebbe una frase in un'altra lingua. Qui si aggiunge l'inglese per id e il frontend sceglie in base alla lingua attiva.
+# Le voci non elencate (es. modelli presi dinamicamente da HF) ripiegano su desc.
+DESC_EN: dict = {
+    # --- testo ---
+    "qwen38-27b": "Newest flagship. Native MTP speculative decoding, smooth on 24 GB.",
+    "qwen38-27b-q4km": "Flagship at the standard quant. Best compatibility.",
+    "qwen38-8b": "Small flagship with MTP speedup. Runs on 8 GB.",
+    "qwen35-32b": "Strong reasoning. Needs 24 GB.",
+    "qwen35-14b": "Balanced between quality and speed.",
+    "qwen35-8b": "Best value in the lineup.",
+    "qwen35-4b": "Light and efficient. Runs on CPU too.",
+    "llama4-scout-17b": "MoE with 17B active parameters. Multimodal.",
+    "llama4-maverick-17b": "MoE flagship, 128 experts. Needs a large GPU.",
+    "deepseek-r1-distill-32b": "Reasoning-tuned. Strong at math and code.",
+    "deepseek-r1-distill-14b": "A lighter reasoning model.",
+    "deepseek-r1-distill-8b": "Entry-level reasoning model.",
+    "gemma3-27b": "Google's multimodal model: vision plus text.",
+    "gemma3-12b": "Multimodal at a balanced size.",
+    "gemma3-4b": "Lightweight multimodal.",
+    "mistral-small-3.2": "Europe's strongest open release. Multilingual.",
+    "qwen3-coder-32b": "Strongest open coding model.",
+    "qwen3-coder-8b": "Lightweight coding model.",
+    "bge-m3": "Multilingual embedding model. A must for RAG.",
+    # --- video ---
+    "wan21-t2v-1.3b": "Light text-to-video. Runs on 8 GB, 480p and up.",
+    "wan21-t2v-14b": "High-quality text-to-video flagship. Needs 24 GB or more.",
+    "ltx-video-2b": "Very fast generation on 6 GB. Good for previews.",
+    "cogvideox-5b": "Zhipu's open video model, 1280x720. Needs 16 GB.",
+    # --- immagini ---
+    "img-qwen-image": "Alibaba's image model. Renders Chinese and English text cleanly, so it suits posters, images with captions and realistic photos.",
+    "img-flux-dev": "Black Forest Labs' 12B rectified-flow model. Best prompt following and composition; good for concept art and realistic portraits.",
+    "img-flux-schnell": "Distilled FLUX. Four steps per image, several times faster than dev; good for batches of drafts.",
+    "img-realvisxl-v4": "SDXL-based checkpoint tuned for realism. Convincing skin and portraits, and the fastest to load as a single file.",
+    "img-sdxl-base": "Stability's SDXL base. Largest ecosystem of LoRAs and ControlNets; runs on 8 GB.",
+    "img-sd35-large": "Stability's newer MMDiT, 8B parameters. Handles typography and complex prompts better than SDXL.",
+}
+
+# Categorie del negozio modelli (testo / immagini / video): la barra dei filtri del frontend le mostra in quest'ordine
+STORE_CATEGORIES: List[dict] = [
+    {"key": "all", "label_en": "All", "label_it": "Tutti"},
+    {"key": "text", "label_en": "Text", "label_it": "Testo"},
+    {"key": "image", "label_en": "Image", "label_it": "Immagini"},
+    {"key": "video", "label_en": "Video", "label_it": "Video"},
+]
+
+
+def list_images(source: str = DEFAULT_SOURCE) -> List[dict]:
+    """Elenca i modelli immagine (disponibilita' filtrata per sorgente di download).
+
+    In piu' unisce alle voci versione / parametri / precisione / risoluzione di IMAGE_META e allinea quant alla precisione reale dei pesi
+    (per evitare voci marcate BF16 con un file in realta' INT8).
+    """
+    out = []
+    for m in IMAGE_MODELS:
+        item = dict(m)
+        item.update(IMAGE_META.get(m["id"], {}))
+        if item.get("precision"):
+            item["quant"] = item["precision"]
+        item["available_sources"] = list(m.get("available_sources") or [])
+        item["source_ok"] = source in item["available_sources"]
+        item["desc_en"] = DESC_EN.get(m["id"], "")
+        out.append(item)
+    return out
+
+
+def get_image_by_id(model_id: str) -> Optional[dict]:
+    """Voce del modello immagine per id (usata dall'API di download del negozio)."""
+    for m in IMAGE_MODELS:
+        if m["id"] == model_id:
+            return dict(m)
+    return None
+
+
+def list_for_store(source: str = DEFAULT_SOURCE, category: Optional[str] = None) -> List[dict]:
+    """Punto unico di ingresso del negozio: unisce testo, immagini e video in un solo elenco, con il campo category.
+
+    Con category None o "all" restituisce tutto; con "text"/"image"/"video" solo quella categoria.
+    """
+    cat = None if category in (None, "", "all") else category
+    items: List[dict] = []
+
+    # Si scorre direttamente CATALOG e la categoria e' quella di ModelEntry.category: to_dict() non sempre include category e un
+    # setdefault marcherebbe per errore come text i modelli video.
+    for entry in CATALOG:
+        item = entry.to_dict(source)
+        item["category"] = getattr(entry, "category", "text") or "text"
+        item["source_ok"] = source in (item.get("available_sources") or [])
+        item["desc_en"] = DESC_EN.get(entry.id, "")
+        items.append(item)
+
+    if cat in (None, "image"):
+        items.extend(list_images(source))
+
+    if cat is None:
+        # i modelli video arrivano gia' da list_all via CURATED (con category="video")
+        pass
+
+    if cat is None or cat == "all":
+        return items
+    return [m for m in items if m.get("category") == cat]

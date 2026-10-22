@@ -18,7 +18,7 @@ function fmtGB(gb) {
 }
 
 function ModelCard({ model, targetId, downloadedMap, onDownloaded, source, activeJob, onJobStarted }) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const [state, setState] = useState(activeJob ? 'downloading' : 'idle')
   const [percent, setPercent] = useState(0)
   const [detail, setDetail] = useState('')
@@ -108,9 +108,24 @@ function ModelCard({ model, targetId, downloadedMap, onDownloaded, source, activ
   }
 
   const fits = model.fits === false
+  const isImage = model.category === 'image'
 
   // Area di stato a destra
   function renderStatus() {
+    // I modelli immagine sono a tre parti unet/clip/vae: il negozio non puo' scaricarli come file singolo. Meglio dare direttamente
+    // l'accesso al repository che un pulsante di download destinato a fallire.
+    if (isImage && !isComplete && state === 'idle') {
+      return (
+        <a
+          href={model.repo ? `https://huggingface.co/${model.repo}` : '#'}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="shrink-0 text-sm px-3 py-2 rounded-lg border border-purple/50 text-purple hover:bg-purple/10 transition"
+        >
+          {t('store.getFromRepo')}
+        </a>
+      )
+    }
     if (state === 'downloading') {
       return (
         <div className="w-32">
@@ -159,11 +174,50 @@ function ModelCard({ model, targetId, downloadedMap, onDownloaded, source, activ
     <div className="bg-card rounded-xl p-4 border border-gray/30">
       <div className="flex justify-between items-start">
         <div className="flex-1 min-w-0">
-          <div className="font-bold text-lg flex items-center gap-2">
+          <div className="font-bold text-lg flex items-center gap-2 flex-wrap">
             {model.name}
+            <span className={`text-xs font-normal px-2 py-0.5 rounded ${
+              model.category === 'image'
+                ? 'bg-green/20 text-green'
+                : model.category === 'video'
+                ? 'bg-purple/20 text-purple'
+                : 'bg-blue/20 text-blue'
+            }`}>{t(`store.cat.${model.category || 'text'}`)}</span>
             <span className="text-xs font-normal px-2 py-0.5 rounded bg-blue/20 text-blue">{model.quant}</span>
           </div>
-          <div className="text-gray text-sm mt-1">{model.desc}</div>
+          {/* Descrizione nelle due lingue, scelta in base alla lingua attiva; se manca quella inglese si ripiega su desc.
+              [2026-10-22 v1.1.39] Nel nostro fork desc e' in italiano: l'inglese usa desc_en, italiano e cinese desc.
+              Versione originale: lang === 'zh' ? (desc || desc_en) : (desc_en || desc) */}
+          <div className="text-gray text-sm mt-1">{lang === 'en' ? (model.desc_en || model.desc) : (model.desc || model.desc_en)}</div>
+          {/* Dettaglio delle specifiche: dal solo nome non si capisce quale versione, quanto grande, che immagini produce */}
+          <div className="text-xs text-gray/70 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {model.version && (
+              <span>{t('store.specVersion')} <span className="text-fg/90 font-medium">{model.version}</span></span>
+            )}
+            {model.params && (
+              <span>{t('store.specParams')} <span className="text-fg/90 font-medium">{model.params}</span></span>
+            )}
+            {/* Il livello di quantizzazione di testo/video e' gia' nel badge sopra: qui solo il campo di precisione reale dei modelli immagine */}
+            {model.precision && (
+              <span>{t('store.specPrecision')} <span className="text-fg/90 font-medium">{model.precision}</span></span>
+            )}
+            {model.resolution && (
+              <span>{t('store.specResolution')} <span className="text-fg/90 font-medium">{model.resolution}</span></span>
+            )}
+            {model.steps != null && (
+              <span>{t('store.specSteps')} <span className="text-fg/90 font-medium">{model.steps} · CFG {model.cfg}</span></span>
+            )}
+            {model.loader && (
+              <span>{t('store.specLoader')} <span className="text-fg/90 font-medium">{model.loader === 'checkpoint' ? t('store.loaderCheckpoint') : t('store.loaderUnet')}</span></span>
+            )}
+          </div>
+          {model.filename && (
+            <div className="text-xs text-gray/50 mt-1 font-mono break-all">
+              {model.filename}
+              {model.clip_name && <span className="text-gray/40"> + {model.clip_name}</span>}
+              {model.vae_name && <span className="text-gray/40"> + {model.vae_name}</span>}
+            </div>
+          )}
           <div className="text-xs text-gray/70 mt-2">
             {t('store.sizeInfo', { size: model.size_gb, vram: model.min_vram_gb })}
             {model.fits != null && (
@@ -201,6 +255,8 @@ export default function Store({ targetId }) {
   const [refreshing, setRefreshing] = useState(false)
   const [refreshMsg, setRefreshMsg] = useState('')
   const [filter, setFilter] = useState('all') // all | fits
+  const [cat, setCat] = useState('all') // all | text | image | video
+  const [q, setQ] = useState('')
   const [source, setSource] = useState('hf-mirror') // hf-mirror | modelscope | huggingface
   const [tab, setTab] = useState('curated') // curated | dynamic
 
@@ -279,13 +335,39 @@ export default function Store({ targetId }) {
     loadActiveJobs()
   }, [targetId, source])
 
-  const shown = filter === 'fits' ? models.filter(m => m.fits !== false) : models
+  // Tre condizioni insieme: tipo / adatto a questa macchina / parola chiave. Il tipo usa il campo category;
+  // le voci vecchie senza il campo sono trattate come text.
+  const kw = q.trim().toLowerCase()
+  const shown = models.filter(m => {
+    if (cat !== 'all' && (m.category || 'text') !== cat) return false
+    if (filter === 'fits' && m.fits === false) return false
+    if (kw) {
+      // La ricerca copre le descrizioni in entrambe le lingue: cambiando lingua la stessa parola continua a trovare i risultati
+      const hay = `${m.name || ''} ${m.desc || ''} ${m.desc_en || ''} ${m.filename || ''} ${(m.tags || []).join(' ')}`.toLowerCase()
+      if (!hay.includes(kw)) return false
+    }
+    return true
+  })
+  const typeCounts = models.reduce((acc, m) => {
+    const c = m.category || 'text'
+    acc[c] = (acc[c] || 0) + 1
+    return acc
+  }, {})
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <h1 className="text-2xl font-bold">{t('store.title')}</h1>
-        <div className="flex gap-2 items-center">
+        <div className="flex items-center gap-3 flex-wrap">
+          <h1 className="text-2xl font-bold">{t('store.title')}</h1>
+          <span className="text-sm text-gray/70">{t('store.resultCount', { n: shown.length })}</span>
+        </div>
+        <div className="flex gap-2 items-center flex-wrap">
+          <input
+            value={q}
+            onChange={e => setQ(e.target.value)}
+            placeholder={t('store.searchPlaceholder')}
+            className="px-3 py-1.5 rounded-lg text-sm bg-bg border border-gray/40 text-fg placeholder:text-gray/50 w-48 focus:outline-none focus:border-blue"
+          />
           {[['all', t('store.all')], ['fits', t('store.fits')]].map(([v, l]) => (
             <button
               key={v}
@@ -311,6 +393,30 @@ export default function Store({ targetId }) {
       {refreshMsg && (
         <div className="text-sm text-gray mb-3 px-3 py-2 bg-card rounded-lg border border-gray/20">{refreshMsg}</div>
       )}
+
+      {/* Filtro per tipo: tutti / testo / immagini / video, con il conteggio per tipo [2026-10-22 v1.1.39, dal progetto originale] */}
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <span className="text-sm text-gray/70">{t('store.catFilter')}</span>
+        {[
+          ['all', t('store.cat.all'), models.length],
+          ['text', t('store.cat.text'), typeCounts.text || 0],
+          ['image', t('store.cat.image'), typeCounts.image || 0],
+          ['video', t('store.cat.video'), typeCounts.video || 0],
+        ].map(([v, l, n]) => (
+          <button
+            key={v}
+            onClick={() => setCat(v)}
+            className={`px-3 py-1.5 rounded-lg text-sm border transition ${
+              cat === v
+                ? 'border-blue bg-blue/20 text-blue'
+                : 'border-gray/40 text-fg/70 hover:bg-gray/10'
+            }`}
+          >
+            {l}
+            <span className="ml-1 text-xs opacity-70">({n})</span>
+          </button>
+        ))}
+      </div>
 
       {/* Cambio scheda: selezionati / popolari dinamici */}
       <div className="flex items-center gap-2 mb-4">
@@ -357,6 +463,11 @@ export default function Store({ targetId }) {
           <div className="text-gray">{t('store.loading')}</div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {shown.length === 0 && (
+              <div className="col-span-full text-center text-gray py-10 bg-card rounded-lg border border-gray/20">
+                {t('store.empty')}
+              </div>
+            )}
             {shown.map(m => (
               <ModelCard
                 key={m.id}

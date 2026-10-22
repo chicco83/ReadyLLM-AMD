@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { IconRefresh, IconPlay, IconStop, IconRocket } from '../components/Icons'
 import LongVideoDeploy from './LongVideoDeploy'
+import ImageGenPanel from '../components/ImageGenPanel'   // [2026-10-22 v1.1.39] testo-immagine con ComfyUI (dal progetto originale)
 import Tune from './Tune'
 import { readLastModel, writeLastModel } from '../lib/lastModel'
 import ProgressPanel from '../components/ProgressPanel'
@@ -9,7 +10,8 @@ import { useI18n } from '../i18n/I18nContext'
 export default function Deploy({ targetId, target, embedded = false }) {
   const { t } = useI18n()
   const isVideo = target?.engine_type === 'comfyui'
-  const [videoMode, setVideoMode] = useState('short') // short | long
+  // [2026-10-22 v1.1.39] aggiunto 'image' (testo-immagine). Versione precedente: short | long
+  const [videoMode, setVideoMode] = useState('short') // short | long | image
   // [2026-10-02 v1.1.23] Il passaggio scelto e' ricordato (sessionStorage) e il pulsante «Vedi risultati» della barra di progresso
   // puo' portare al Tuning con l'evento 'readyllm:goto-tune': a fine tuning non si torna piu' da soli al Deploy.
   // Versione precedente: const [step, setStep] = useState('deploy') // deploy | tune
@@ -62,7 +64,7 @@ export default function Deploy({ targetId, target, embedded = false }) {
   return (
     <div>
       <div className="inline-flex gap-1 p-1 rounded-lg bg-card border border-gray/30 mb-6">
-        {[['short', t('deploy.shortVideo')], ['long', t('deploy.longVideo')]].map(([k, label]) => (
+        {[['short', t('deploy.shortVideo')], ['long', t('deploy.longVideo')], ['image', t('deploy.imageGen')]].map(([k, label]) => (
           <button key={k} onClick={() => setVideoMode(k)}
             className={`px-4 py-1.5 rounded-md text-sm transition ${
               videoMode === k ? 'bg-blue text-bg font-semibold' : 'text-gray hover:text-fg'}`}>
@@ -70,9 +72,10 @@ export default function Deploy({ targetId, target, embedded = false }) {
           </button>
         ))}
       </div>
-      {videoMode === 'short'
-        ? <VideoDeploy targetId={targetId} target={target} />
-        : <LongVideoDeploy targetId={targetId} target={target} />}
+      {/* Versione precedente: videoMode === 'short' ? <VideoDeploy/> : <LongVideoDeploy/> */}
+      {videoMode === 'short' && <VideoDeploy targetId={targetId} target={target} />}
+      {videoMode === 'long' && <LongVideoDeploy targetId={targetId} target={target} />}
+      {videoMode === 'image' && <ImageGenPanel targetId={targetId} target={target} />}
     </div>
   )
 }

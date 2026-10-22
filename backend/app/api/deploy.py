@@ -364,6 +364,167 @@ class VideoGenerateRequest(BaseModel):
     teacache_thresh: float = 0.15
 
 
+# ==================== Testo-immagine con ComfyUI (v1.1.39, 2026-10-22) ====================
+# Integrato dal progetto originale (htobty/ReadyLLM, commit a0416b7 e precedenti), messaggi e commenti in italiano.
+
+class ImageGenerateRequest(BaseModel):
+    target_id: str
+    prompt: str
+    # Nome del file del modello. Con checkpoint e' il ckpt in checkpoints (es. RealVisXL_V4.0.safetensors); con unet e' il peso in
+    # diffusion_models (es. qwen_image_2.1_int8_convrot.safetensors); il campo loader li distingue. Se vuoto, il backend prende il primo
+    # dell'elenco corrispondente al loader.
+    model_name: str = ""
+    loader: str = "checkpoint"  # checkpoint | unet
+    clip_name: str = ""         # obbligatorio con loader=unet (encoder testuale di Qwen-Image)
+    vae_name: str = ""          # obbligatorio con loader=unet
+    negative_prompt: str = ""
+    width: int = 1024
+    height: int = 1024
+    steps: int = 25
+    cfg: float = 6.0
+    seed: Optional[int] = None
+    sampler: str = "dpmpp_2m"
+    scheduler: str = "karras"
+    # Stesso interruttore «orchestrazione AI» della pagina video: prima dell'invio la descrizione colloquiale viene espansa in un prompt.
+    enhance: bool = False
+
+
+@router.get("/image-models")
+def list_image_models(target_id: str):
+    """Elenca tutti i modelli di ComfyUI sulla macchina target utilizzabili per testo-immagine, in un unico elenco.
+
+    Due fonti, corrispondenti a due catene di caricamento:
+      1. cartella checkpoints (SD/SDXL, con CLIP+VAE inclusi) -> CheckpointLoaderSimple;
+      2. unet immagine in diffusion_models (come Qwen-Image 2.1) -> UNETLoader piu' CLIPLoader/VAELoader separati, nella stessa cartella
+         dei pesi video MiniMax H3.
+    Prima si elencava solo la prima: mettendo qwen_image in diffusion_models il menu mostrava solo RealVisXL e sembrava che il modello fosse
+    sparito. Ogni voce ha il campo loader, con cui il frontend decide che catena usare all'invio."""
+    target, executor, engine = _adapter(target_id)
+    try:
+        if not hasattr(engine, "list_checkpoints"):
+            return {"models": [], "count": 0, "error": "Il motore della macchina target non supporta la generazione di immagini, usare ComfyUI"}
+        if not engine.is_running():
+            return {"models": [], "count": 0, "error": "Il servizio ComfyUI non e' in esecuzione, avviarlo prima dalla pagina Deploy"}
+
+        models = []
+        for n in engine.list_checkpoints():
+            models.append({"filename": n, "name": n.rsplit(".", 1)[0], "loader": "checkpoint"})
+        try:
+            # Import ritardato: queste funzioni servono solo per le immagini; dentro la funzione un import dimenticato in cima non viene
+            # nascosto dall'except di sotto come NameError silenzioso.
+            from ..services import comfyui_image as comfy_image
+            unets = comfy_image.list_unets(engine)
+            if unets:
+                clips = comfy_image.list_clips(engine)
+                vaes = comfy_image.list_vaes(engine)
+                for n in unets:
+                    if not comfy_image.is_image_unet(n):
+                        continue  # gli unet video non finiscono nel menu delle immagini
+                    pair = comfy_image.pair_for(n, clips, vaes)
+                    if not pair:
+                        continue  # un peso senza CLIP/VAE abbinati darebbe errore se scelto
+                    models.append({"filename": n, "name": n.rsplit(".", 1)[0], "loader": "unet",
+                                   "clip_name": pair[0], "vae_name": pair[1]})
+        except Exception:
+            pass  # se il rilevamento degli unet fallisce resta l'elenco dei checkpoint
+        return {"models": models, "count": len(models)}
+    finally:
+        executor.close()
+
+
+@router.post("/image")
+def generate_image(req: ImageGenerateRequest):
+    """Invia a ComfyUI un text-to-image e restituisce prompt_id.
+
+    Due catene secondo req.loader: checkpoint (SD/SDXL, CLIP+VAE inclusi) usa CheckpointLoaderSimple; unet (pesi con solo UNET come
+    Qwen-Image) usa UNETLoader + CLIPLoader + VAELoader, con clip/vae riportati dal frontend da /image-models. req.enhance ha lo stesso
+    significato della pagina video: prima dell'invio la descrizione colloquiale e' espansa in un prompt; se l'LLM non c'e' si ripiega
+    in silenzio sul prompt originale, senza mai bloccare la generazione.
+
+    Dopo l'invio il frontend fa polling su /generate/progress per il percorso dell'immagine (anche l'output di SaveImage e' nel campo
+    images, la logica di avanzamento e' comune). Solo per Target con engine_type=comfyui."""
+    target, executor, engine = _adapter(req.target_id)
+    try:
+        if not hasattr(engine, "build_image_workflow"):
+            return {"success": False, "message": "Il motore della macchina target non supporta la generazione di immagini, usare ComfyUI"}
+        if not engine.is_running():
+            return {"success": False, "message": "Il servizio ComfyUI non e' in esecuzione, avviarlo prima dalla pagina Deploy"}
+
+        prompt = req.prompt
+        enhanced = False
+        final_prompt = ""
+        reasoning = ""
+        if req.enhance:
+            try:
+                from ..services.image_prompt import enhance_prompt as enhance_image
+                got = enhance_image(req.prompt)
+                if got and got.get("prompt"):
+                    prompt = got["prompt"]
+                    final_prompt = prompt
+                    reasoning = got.get("reasoning", "")
+                    enhanced = True
+                else:
+                    # si spiega perche' non c'e' stata l'orchestrazione: il frontend lo mostra invece di fingere un successo
+                    reasoning = "Miglioramento AI del prompt non disponibile (LLM non configurato o non raggiungibile): uso il prompt originale"
+            except Exception:
+                reasoning = "Miglioramento AI del prompt non disponibile (LLM non configurato o non raggiungibile): uso il prompt originale"
+
+        model = req.model_name
+        no_model_msg = "Nessun modello immagine disponibile (o mancano CLIP/VAE abbinati): aggiornare l'elenco dei modelli"
+        if req.loader == "unet":
+            from ..services.comfyui_image import (
+                build_unet_image_workflow, list_unets, list_clips, list_vaes, resolve_name)
+            # Il menu del frontend (e il localStorage) puo' avere il nome senza estensione, ma ComfyUI accetta solo il nome file completo:
+            # senza .safetensors l'intero ordine viene respinto dalla validazione. Qui si riporta tutto al nome reale dell'elenco.
+            model = resolve_name(model, list_unets(engine))
+            req.clip_name = resolve_name(req.clip_name, list_clips(engine))
+            req.vae_name = resolve_name(req.vae_name, list_vaes(engine))
+            if not model:
+                return {"success": False, "message": no_model_msg}
+            if not req.clip_name or not req.vae_name:
+                # senza CLIP/VAE non si puo' comporre la catena: il frontend deve ricaricare l'elenco
+                return {"success": False, "message": no_model_msg}
+            wf = build_unet_image_workflow(
+                prompt=prompt,
+                unet_name=model,
+                clip_name=req.clip_name,
+                vae_name=req.vae_name,
+                negative_prompt=req.negative_prompt or "",
+                width=req.width,
+                height=req.height,
+                steps=req.steps,
+                cfg=req.cfg,
+                seed=req.seed,
+            )
+        else:
+            if not model:
+                names = engine.list_checkpoints()
+                if not names:
+                    return {"success": False, "message": no_model_msg}
+                model = names[0]
+            wf = engine.build_image_workflow(
+                prompt=prompt,
+                ckpt_name=model,
+                negative_prompt=req.negative_prompt or "",
+                width=req.width,
+                height=req.height,
+                steps=req.steps,
+                cfg=req.cfg,
+                seed=req.seed,
+                sampler=req.sampler,
+                scheduler=req.scheduler,
+            )
+        ok, result = engine.submit_workflow(wf)
+        if not ok:
+            return {"success": False, "message": result}
+        return {"success": True, "prompt_id": result, "model": model,
+                "loader": req.loader, "enhanced": enhanced,
+                "final_prompt": final_prompt, "reasoning": reasoning,
+                "message": "Task di generazione inviato"}
+    finally:
+        executor.close()
+
+
 @router.post("/generate")
 def generate_video(req: VideoGenerateRequest):
     """Invia a ComfyUI un task di generazione text-to-video e restituisce prompt_id.

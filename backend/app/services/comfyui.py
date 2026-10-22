@@ -201,10 +201,15 @@ class ComfyUIAdapter(EngineAdapter):
             return False, "Scrittura del file temporaneo del workflow non riuscita"
 
         url = f"{self._base_url()}/prompt"
+        # [2026-10-22 v1.1.39] Dal progetto originale (htobty/ReadyLLM, a0416b7): --data-binary al posto di --data. --data applica le regole
+        # di curl a a-capo e @, e un prompt multilinea / con caratteri non ASCII passando dal curl remoto puo' essere riscritto, cosi' a
+        # ComfyUI arriva un grafo diverso da quello locale. Il charset e' esplicito, per non far interpretare il file alla pagina di codici di Windows.
+        # Versione precedente: -H "Content-Type: application/json" --data "@{tmp}"
+        ctype = "Content-Type: application/json; charset=utf-8"
         if self.target.os == "windows":
-            cmd = f'curl -s --max-time 30 -X POST "{url}" -H "Content-Type: application/json" --data "@{tmp}"'
+            cmd = f'curl -s --max-time 30 -X POST "{url}" -H "{ctype}" --data-binary "@{tmp}"'
         else:
-            cmd = f"curl -s --max-time 30 -X POST {shlex.quote(url)} -H 'Content-Type: application/json' --data @{shlex.quote(tmp)}"
+            cmd = f"curl -s --max-time 30 -X POST {shlex.quote(url)} -H '{ctype}' --data-binary @{shlex.quote(tmp)}"
         result = self.executor.run(cmd, timeout=35)
         out = (result.stdout or "").strip()
         try:
@@ -213,9 +218,17 @@ class ComfyUIAdapter(EngineAdapter):
             return False, f"Invio non riuscito, risposta non interpretabile: {out[:300]}"
         if "prompt_id" in data:
             return True, data["prompt_id"]
-        # Se la validazione di ComfyUI fallisce restituisce il dettaglio dell'errore
-        err = data.get("error") or data
-        return False, f"Workflow rifiutato: {json.dumps(err, ensure_ascii=False)[:400]}"
+        # Se la validazione di ComfyUI fallisce, l'indicazione utile (quale nodo, quale ingresso, cosa ci si aspetta) e' in node_errors:
+        # rispondere solo con error.message equivale a buttare gli indizi. Si riportano anche i node_errors (limite 800 caratteri).
+        # Versione precedente: err = data.get("error") or data  (limite 400 caratteri, senza node_errors)
+        err = data.get("error")
+        if not isinstance(err, dict):
+            err = {"error": err} if err is not None else {}
+        if data.get("node_errors"):
+            err["node_errors"] = data["node_errors"]
+        if not err:
+            err = data
+        return False, f"Workflow rifiutato: {json.dumps(err, ensure_ascii=False)[:800]}"
 
     def get_history(self, prompt_id: str) -> Optional[dict]:
         """Interroga la cronologia dei task; a task completato in outputs ci sono le informazioni sui file prodotti (video/immagini)."""
@@ -275,6 +288,71 @@ class ComfyUIAdapter(EngineAdapter):
             time.sleep(2)
         return False
 
+
+    # ==================== Workflow testo-immagine (checkpoint SD / SDXL) ====================
+    # [2026-10-22 v1.1.39] Integrato dal progetto originale (htobty/ReadyLLM, a0416b7), commenti in italiano.
+
+    def list_checkpoints(self) -> list:
+        """Modelli immagine (pesi principali SD/SDXL) nella cartella checkpoints di ComfyUI sulla macchina target.
+
+        Chiede direttamente a /object_info/CheckpointLoaderSimple: restituisce l'elenco di ckpt_name che il loader riconosce davvero, piu'
+        affidabile che indovinare la struttura delle cartelle (l'utente puo' montarne piu' di una con extra_model_paths.yaml).
+        """
+        info = self._curl_json("/object_info/CheckpointLoaderSimple", timeout=15)
+        if not info:
+            return []
+        try:
+            opts = info["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"][0]
+        except (KeyError, IndexError, TypeError):
+            return []
+        return [o for o in opts if isinstance(o, str)]
+
+    def build_image_workflow(
+        self,
+        prompt: str,
+        ckpt_name: str,
+        negative_prompt: str = "",
+        width: int = 1024,
+        height: int = 1024,
+        steps: int = 25,
+        cfg: float = 6.0,
+        seed: Optional[int] = None,
+        sampler: str = "dpmpp_2m",
+        scheduler: str = "karras",
+        filename_prefix: str = "modeldeploy/image",
+    ) -> dict:
+        """Costruisce il prompt API di ComfyUI (formato piatto) per testo-immagine SD / SDXL.
+
+        Catena: CheckpointLoaderSimple -> CLIPTextEncode (positivo/negativo) -> EmptyLatentImage -> KSampler -> VAEDecode -> SaveImage.
+
+        Differenza dalla catena video: il modello video (H3) e' UNETLoader + nodi dedicati MiniMaxH3*, mentre un checkpoint immagine
+        (es. RealVisXL) ha gia' CLIP e VAE e si carica con CheckpointLoaderSimple in un colpo (MODEL=0 / CLIP=1 / VAE=2): i nodi sono
+        diversi e il template video non si puo' riusare.
+
+        ckpt_name deve essere il nome file reale in checkpoints (vedi list_checkpoints). Risoluzione nativa di SDXL 1024x1024, steps 25 /
+        cfg 6 e' un punto di partenza sicuro; per SD1.5 meglio 512x512, cfg 7, campionatore dpmpp_2m + karras.
+        """
+        sd = seed if seed is not None else int(uuid.uuid4().int % (2 ** 32 - 1))
+        return {
+            "300": {"class_type": "CheckpointLoaderSimple",
+                    "inputs": {"ckpt_name": ckpt_name}},
+            "301": {"class_type": "CLIPTextEncode",
+                    "inputs": {"text": prompt, "clip": ["300", 1]}},
+            "302": {"class_type": "CLIPTextEncode",
+                    "inputs": {"text": negative_prompt, "clip": ["300", 1]}},
+            "303": {"class_type": "EmptyLatentImage",
+                    "inputs": {"width": int(width), "height": int(height), "batch_size": 1}},
+            "304": {"class_type": "KSampler",
+                    "inputs": {"model": ["300", 0], "positive": ["301", 0],
+                               "negative": ["302", 0], "latent_image": ["303", 0],
+                               "seed": sd, "steps": int(steps), "cfg": float(cfg),
+                               "sampler_name": sampler, "scheduler": scheduler,
+                               "denoise": 1.0}},
+            "305": {"class_type": "VAEDecode",
+                    "inputs": {"samples": ["304", 0], "vae": ["300", 2]}},
+            "306": {"class_type": "SaveImage",
+                    "inputs": {"images": ["305", 0], "filename_prefix": filename_prefix}},
+        }
 
     # ==================== Template di workflow per la generazione video (MiniMax H3) ====================
 
