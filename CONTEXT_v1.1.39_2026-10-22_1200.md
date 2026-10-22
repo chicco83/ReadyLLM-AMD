@@ -148,3 +148,5 @@ Rimossa da `EngineRow` la sezione «Build installate / Attiva / Installa»; spos
 - v1.1.37: `Target.extra_engines`, endpoint `/extra-engines`, `find_llama_installs` (custom/name), `EngineRow` con aggiunta/uso/rimozione, `_pick_engine` con nome personalizzato, `create_target` e `upsert_target` preservano gli extra.
 
 - v1.1.38: `collectors._pagefile_windows` (Win32_PageFileUsage + Get-PhysicalDisk MediaType + commit da Win32_OperatingSystem), `cpu_mem.pagefile`, riga in Monitor, avviso nel worker del tuner.
+
+- v1.1.39: integrati da htobty/ReadyLLM i commit 48e4d9e, a0416b7, 21aed3b (remote `upstream/main` clonato in sola lettura; base comune c84e8f5). Nuovi: `services/comfyui_image.py`, `services/image_prompt.py`, `components/ImageGenPanel.jsx`; modificati `comfyui.py`, `deploy.py`, `model_catalog.py`, `store.py`, `Store.jsx`, `Deploy.jsx`, `useWebSocket.js`. Restano da valutare: 7b32952 (benchmark con ignore_eos e finestra a 512 token, --spec-draft-p-min, GPU Windows senza nome standard), 16f8096, ff33747 (`$HOME` nei percorsi di installazione Linux).

@@ -164,3 +164,7 @@ Impostazioni → Motori di inferenza → **Aggiungi un motore personalizzato**: 
 
 ## 38. Paging di Windows e dischi lenti (v1.1.38)
 Se durante i test il disco e' al 100% pur con RAM libera, guarda la riga «File di paging» nella scheda CPU/Memoria del Monitoraggio. Il paging dipende dalla memoria impegnata (commit), non da quella fisica usata. Rimedi: spostare il paging su un SSD (Sistema → Impostazioni di sistema avanzate → Prestazioni → Avanzate → Memoria virtuale: togli il file da E:, lascia «gestito dal sistema» su C:), ridurre il contesto o la KV cache (meno VRAM e meno memoria host impegnata), oppure scegliere un modello piu' piccolo. Il tuning avvisa all'inizio se il paging e' su un HDD.
+
+## 39. Generazione di immagini e negozio con categorie (v1.1.39)
+- **Immagini:** con un motore ComfyUI in esecuzione, nel Deploy compare la scheda **Immagine** accanto a «Video breve» e «Video lungo»: scegli il modello (checkpoint SD/SDXL o UNET Qwen-Image), scrivi il prompt, attiva se vuoi il **miglioramento AI** (usa lo stesso LLM configurato per il video; se non risponde si usa il prompt originale) e premi **Genera immagine**. Per i modelli UNET servono in ComfyUI anche CLIP e VAE abbinati.
+- **Negozio modelli:** filtra per tipo (Testo / Immagini / Video), cerca per nome; le schede mostrano versione, dimensione, precisione, uscita e nome dei file. I modelli immagine hanno tre file e non si scaricano dal negozio: il pulsante «Vai al repository» apre la pagina del modello.

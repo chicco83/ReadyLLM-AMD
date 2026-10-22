@@ -1,8 +1,16 @@
 # CHANGELOG — ReadyLLM-AMD
 
-Versione corrente: **1.1.38** — 2026-10-02 08:20
+Versione corrente: **1.1.39** — 2026-10-22 12:00
 
 Le voci sono numerate in ordine; ogni sessione aggiunge la propria in cima o in coda mantenendo la numerazione.
+
+## 41. v1.1.39 — 2026-10-22 12:00 — Integrazione dal progetto originale (htobty/ReadyLLM)
+Confronto fatto il 2026-10-22: l'originale ha 7 commit dopo il fork (base `c84e8f5`). Integrati i punti 1 e 2 concordati; il resto (tuning localizzato, build per backend, rilevamento GPU, fix `$HOME` Linux) non e' stato portato.
+- **Fix `useWebSocket`** (48e4d9e): niente riconnessione dopo lo smontaggio, timer in un ref, callback staccate, nessuna connessione con url vuoto.
+- **Generazione di immagini con ComfyUI** (a0416b7): scheda «Immagine» nel Deploy dei motori ComfyUI (`ImageGenPanel.jsx`), endpoint `GET /api/deploy/image-models` e `POST /api/deploy/image`, percorso checkpoint (SD/SDXL) e percorso UNET (Qwen-Image, `comfyui_image.py`), miglioramento del prompt con LLM (`image_prompt.py`, con prompt di sistema tradotto in italiano), invio workflow con `--data-binary` e `node_errors` negli errori. Corretto un difetto dell'originale: `_WEIGHT_EXTS` era usata e non definita.
+- **Negozio modelli con categorie** (21aed3b): filtro per tipo (testo/immagini/video) con conteggi, ricerca, schede con versione/parametri/precisione/risoluzione/loader e nomi dei file, descrizioni in due lingue; i modelli immagine non si scaricano come file singolo (rimando al repository). `model_catalog.py` (+6 modelli immagine, `list_for_store`) e `store.py` uniti al nostro codice con merge a tre vie; testi cinesi tradotti in italiano (descrizioni dei modelli, commenti, messaggi). In italiano la descrizione usa `desc`, in inglese `desc_en`.
+- Traduzioni `it/en/zh` delle nuove chiavi (`deploy.image*`, `store.*`); `deploy.comfyuiHint` aggiornato.
+- Non portato volutamente: `services/i18n.py` (registro messaggi zh/en dell'originale): i messaggi del backend restano in italiano.
 
 ## 40. v1.1.38 — 2026-10-02 08:20 — Paging di Windows visibile
 - Causa delle scritture al 100% sul disco E: (vecchio disco a piatti) durante i test: il **file di paging di Windows** era su E:. Windows scrive nel paging in base alla memoria *impegnata* (commit: driver GPU, buffer host di ROCm/Vulkan, allocazioni di llama-server), anche con RAM fisica libera.
